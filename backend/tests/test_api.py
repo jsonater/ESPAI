@@ -38,6 +38,73 @@ class ConceptMeshApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_root_serves_local_dashboard(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Training image library", response.text)
+
+    def test_roboflow_status_does_not_expose_api_key(self):
+        with patch.object(api, "ROBOFLOW_API_KEY", "private-test-key"), patch.object(api, "ROBOFLOW_MODEL_ID", "heritage-project/1"):
+            response = self.client.get("/api/v1/roboflow/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "configured": True,
+            "model_id": "heritage-project/1",
+            "runtime": "serverless-cloud",
+        })
+        self.assertNotIn("private-test-key", response.text)
+
+    def test_roboflow_prediction_requires_configuration(self):
+        with patch.object(api, "ROBOFLOW_API_KEY", None), patch.object(api, "ROBOFLOW_MODEL_ID", None):
+            response = self.client.post(
+                "/api/v1/roboflow/predict",
+                files={"image": ("frame.jpg", self.jpeg, "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_roboflow_prediction_uses_rgb_frame_and_returns_result(self):
+        result = {"predictions": [{"class": "fracture", "confidence": 0.91}]}
+        with (
+            patch.object(api, "ROBOFLOW_API_KEY", "private-test-key"),
+            patch.object(api, "ROBOFLOW_MODEL_ID", "heritage-project/1"),
+            patch("backend.main.run_roboflow_inference", return_value=result) as inference,
+        ):
+            response = self.client.post(
+                "/api/v1/roboflow/predict",
+                files={"image": ("frame.jpg", self.jpeg, "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), result)
+        self.assertEqual(inference.call_args.args[0].shape, (24, 32, 3))
+
+    def test_roboflow_client_uses_bearer_header_and_configured_model(self):
+        image_rgb = np.zeros((24, 32, 3), dtype=np.uint8)
+        expected = {"predictions": []}
+        with (
+            patch.object(api, "ROBOFLOW_API_KEY", "private-test-key"),
+            patch.object(api, "ROBOFLOW_MODEL_ID", "heritage-project/1"),
+            patch("backend.main.InferenceHTTPClient") as client_class,
+            patch("backend.main.InferenceConfiguration") as configuration_class,
+        ):
+            client_class.return_value.configure.return_value.infer.return_value = expected
+
+            result = api.run_roboflow_inference(image_rgb)
+
+        client_class.assert_called_once_with(
+            api_url=api.ROBOFLOW_API_URL,
+            api_key="private-test-key",
+        )
+        configuration_class.assert_called_once_with(api_key_transport="header")
+        client_class.return_value.configure.return_value.infer.assert_called_once_with(
+            image_rgb,
+            model_id="heritage-project/1",
+        )
+        self.assertEqual(result, expected)
+
     def test_camera_stream_returns_mjpeg_and_updates_status(self):
         frame = np.zeros((24, 32, 3), dtype=np.uint8)
         with patch("backend.main.iter_camera_frames", return_value=iter([frame])):

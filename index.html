@@ -271,14 +271,16 @@
               <div class="panel-head"><div><h2 class="panel-title">ESP32-CAM stream</h2><span class="panel-kicker">MJPEG · proxied through the local Python backend</span></div><span class="format-tag">LIVE</span></div>
               <img class="live-feed" id="cameraFeed" alt="Live video from the ESP32 camera" hidden>
               <div class="live-placeholder" id="cameraPlaceholder"><strong>Camera disconnected</strong><span>Connect the ESP32-CAM to the same Wi-Fi network as this laptop.</span></div>
-              <div class="live-controls"><button class="dataset-button primary" id="connectCamera" type="button">Connect stream</button><button class="dataset-button" id="stopCamera" type="button" disabled>Stop</button><small id="cameraMessage">No camera connection active</small></div>
+              <div class="live-controls"><button class="dataset-button primary" id="connectCamera" type="button">Connect stream</button><button class="dataset-button" id="stopCamera" type="button" disabled>Stop</button><button class="dataset-button" id="analyzeFrame" type="button" disabled>Analyze current frame</button><small id="cameraMessage">No camera connection active</small></div>
+              <div class="panel-head"><div><h2 class="panel-title">Roboflow predictions</h2><span class="panel-kicker" id="inferenceMessage">Waiting for model configuration</span></div></div>
+              <div class="sample-body" id="predictionList" aria-live="polite"><span class="panel-kicker">No frame analyzed.</span></div>
             </section>
             <aside class="live-readouts" aria-label="Camera and AI diagnostics">
               <div class="panel live-stat"><small>Stream status</small><strong class="live-state" id="cameraState" data-state="idle">Idle</strong></div>
               <div class="panel live-stat"><small>Frame resolution</small><strong id="cameraResolution">—</strong></div>
               <div class="panel live-stat"><small>Approx. frame rate</small><strong id="cameraFps">—</strong></div>
               <div class="panel live-stat"><small>Frames received</small><strong id="cameraFrames">0</strong></div>
-              <div class="panel live-stat"><small>Damage model</small><strong>Not connected</strong></div>
+              <div class="panel live-stat"><small>Roboflow model</small><strong id="roboflowState">Not configured</strong></div>
               <div class="panel live-stat"><small>Robot commands</small><strong>Disabled</strong></div>
               <div class="live-note"><strong>Prototype status.</strong> The live feed is real when the camera is connected. Detection, severity scoring, and physical commands are not implemented; no restoration action is sent to the robot.</div>
             </aside>
@@ -670,10 +672,32 @@
     });
     document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
     document.getElementById('recordBtn').addEventListener('click', () => showToast('Field record export is not connected in this prototype.'));
-    const cameraApiBase = 'http://127.0.0.1:8000';
+    const cameraApiBase = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : window.location.origin;
     const cameraFeed = document.getElementById('cameraFeed');
     const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+    const analyzeFrameButton = document.getElementById('analyzeFrame');
+    let roboflowConfigured = false;
     let cameraPollTimer;
+
+    function updateInferenceAvailability() {
+      analyzeFrameButton.disabled = !roboflowConfigured || document.getElementById('cameraState').dataset.state !== 'streaming';
+    }
+
+    async function refreshRoboflowStatus() {
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/roboflow/status`);
+        if (!response.ok) throw new Error(`Backend returned HTTP ${response.status}`);
+        const status = await response.json();
+        roboflowConfigured = Boolean(status.configured);
+        document.getElementById('roboflowState').textContent = roboflowConfigured ? status.model_id : 'Not configured';
+        document.getElementById('inferenceMessage').textContent = roboflowConfigured ? 'Serverless Cloud · per-request inference' : 'Set server-side Roboflow model and API key';
+      } catch {
+        roboflowConfigured = false;
+        document.getElementById('roboflowState').textContent = 'Backend offline';
+        document.getElementById('inferenceMessage').textContent = 'Start the local Python backend';
+      }
+      updateInferenceAvailability();
+    }
 
     async function refreshCameraStatus() {
       try {
@@ -685,6 +709,7 @@
         const stateElement = document.getElementById('cameraState');
         stateElement.textContent = stateLabel;
         stateElement.dataset.state = state;
+        updateInferenceAvailability();
         document.getElementById('cameraResolution').textContent = status.width && status.height ? `${status.width} × ${status.height} px` : '—';
         document.getElementById('cameraFps').textContent = status.fps ? `${status.fps} fps` : '—';
         document.getElementById('cameraFrames').textContent = status.frames_received || 0;
@@ -707,6 +732,7 @@
       } catch {
         document.getElementById('cameraState').textContent = 'Backend offline';
         document.getElementById('cameraState').dataset.state = 'error';
+        updateInferenceAvailability();
         document.getElementById('cameraMessage').textContent = 'Start the local Python backend';
         cameraFeed.hidden = true;
         cameraPlaceholder.hidden = false;
@@ -724,6 +750,7 @@
       cameraPlaceholder.querySelector('strong').textContent = 'Connecting to camera…';
       cameraPlaceholder.querySelector('span').textContent = 'Waiting for the configured ESP32-CAM stream.';
       cameraFeed.hidden = false;
+      cameraFeed.crossOrigin = 'anonymous';
       cameraFeed.src = `${cameraApiBase}/api/v1/camera/stream?start=${Date.now()}`;
       document.getElementById('connectCamera').disabled = true;
       document.getElementById('stopCamera').disabled = false;
@@ -743,7 +770,48 @@
       document.getElementById('stopCamera').disabled = true;
       document.getElementById('cameraState').textContent = 'Stopped';
       document.getElementById('cameraState').dataset.state = 'stopped';
+      updateInferenceAvailability();
       document.getElementById('cameraMessage').textContent = 'Stream stopped';
+    });
+
+    analyzeFrameButton.addEventListener('click', async () => {
+      analyzeFrameButton.disabled = true;
+      document.getElementById('inferenceMessage').textContent = 'Sending one frame to Roboflow…';
+      const results = document.getElementById('predictionList');
+      try {
+        if (!cameraFeed.naturalWidth || !cameraFeed.naturalHeight) throw new Error('Wait for a camera frame before analyzing.');
+        const canvas = document.createElement('canvas');
+        canvas.width = cameraFeed.naturalWidth;
+        canvas.height = cameraFeed.naturalHeight;
+        canvas.getContext('2d').drawImage(cameraFeed, 0, 0);
+        const imageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+        if (!imageBlob) throw new Error('Could not capture the current camera frame.');
+        const formData = new FormData();
+        formData.append('image', imageBlob, 'camera-frame.jpg');
+        const response = await fetch(`${cameraApiBase}/api/v1/roboflow/predict`, { method: 'POST', body: formData });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `Inference failed with HTTP ${response.status}`);
+
+        const predictions = Array.isArray(result.predictions) ? result.predictions : [];
+        results.replaceChildren();
+        const summary = document.createElement('strong');
+        summary.className = 'panel-title';
+        summary.textContent = predictions.length ? `${predictions.length} prediction${predictions.length === 1 ? '' : 's'}` : result.top ? `Top class: ${result.top}` : 'No detections returned';
+        results.append(summary);
+        predictions.forEach(prediction => {
+          const item = document.createElement('p');
+          item.className = 'sample-meta';
+          const label = prediction.class || prediction.class_name || prediction.label || 'Unlabeled prediction';
+          const confidence = Number(prediction.confidence);
+          item.textContent = Number.isFinite(confidence) ? `${label} · ${(confidence * 100).toFixed(1)}% confidence` : String(label);
+          results.append(item);
+        });
+        document.getElementById('inferenceMessage').textContent = 'One frame analyzed · cloud inference';
+      } catch (error) {
+        document.getElementById('inferenceMessage').textContent = error.message;
+      } finally {
+        updateInferenceAvailability();
+      }
     });
 
     cameraFeed.addEventListener('error', () => {
@@ -759,7 +827,10 @@
         document.getElementById('liveView').hidden = view !== 'live';
         document.getElementById('reconstructionView').hidden = view !== 'reconstruction';
         document.getElementById('currentViewName').textContent = view === 'dataset' ? 'Training images' : view === 'live' ? 'Live camera' : 'South facade';
-        if (view === 'live') refreshCameraStatus();
+        if (view === 'live') {
+          refreshCameraStatus();
+          refreshRoboflowStatus();
+        }
       } else {
         showToast(`${button.getAttribute('aria-label')} view is not connected yet.`);
       }
