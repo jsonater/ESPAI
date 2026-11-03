@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+httpx2>=0.1,<1
+mapbox-earcut>=1.0,<2
+numpy>=1.26,<3
+opencv-python-headless>=4.10,<5
+python-multipart>=0.0.20,<1
+shapely>=2.0,<3
+trimesh>=4.5,<5
+uvicorn>=0.30,<1

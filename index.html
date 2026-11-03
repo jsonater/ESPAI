@@ -166,6 +166,25 @@
     .summary-stat { flex: 1; padding: 10px 12px; }
     .summary-stat small { display: block; color: var(--muted); font-size: 9px; }
     .summary-stat strong { display: block; margin-top: 2px; color: var(--green-dark); font: 20px var(--serif); }
+    .live-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; align-items: start; }
+    .live-feed-panel { overflow: hidden; }
+    .live-feed { width: 100%; aspect-ratio: 16 / 9; display: block; object-fit: contain; background: #202923; }
+    .live-placeholder { aspect-ratio: 16 / 9; display: grid; place-content: center; gap: 7px; padding: 18px; text-align: center; background: #202923; color: #e6ece5; }
+    .live-placeholder strong { font: 20px var(--serif); }
+    .live-placeholder span { color: #bbc6bc; font-size: 10px; }
+    .live-controls { padding: 11px 13px; display: flex; align-items: center; gap: 7px; border-top: 1px solid #e7eae5; }
+    .live-controls .dataset-button { min-width: 90px; }
+    .live-controls small { margin-left: auto; color: var(--muted); font-size: 9px; }
+    .live-readouts { display: grid; gap: 8px; }
+    .live-stat { padding: 12px; }
+    .live-stat small { display: block; color: var(--muted); font-size: 9px; }
+    .live-stat strong { display: block; margin-top: 3px; color: #3d5143; font: 18px var(--serif); overflow-wrap: anywhere; }
+    .live-state { display: inline-flex; align-items: center; gap: 6px; }
+    .live-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #a4aaa4; }
+    .live-state[data-state="streaming"]::before { background: #5d8a64; }
+    .live-state[data-state="error"]::before { background: var(--clay); }
+    .live-note { padding: 11px 12px; border: 1px solid #eadbcf; background: #f7f0e9; color: #79614d; border-radius: 4px; font-size: 9px; line-height: 1.5; }
+    .live-note strong { color: #614a38; }
     .spin { animation: spin 1.1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 720px) {
@@ -174,6 +193,9 @@
       .dataset-toolbar { align-items: flex-start; flex-direction: column; }
       .dataset-actions { width: 100%; flex-wrap: wrap; }
       .dataset-actions .dataset-button { flex: 1; }
+      .live-layout { grid-template-columns: 1fr; }
+      .live-readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .live-note { grid-column: 1 / -1; }
     }
     @media (min-width: 1450px) { .content { padding-top: 34px; } .image-stage, .scene { height: 410px; } }
     @media (max-width: 980px) { .app { grid-template-columns: 66px minmax(0, 1fr); } .sidebar { padding: 20px 10px; align-items: center; } .brand { padding: 0; } .brand-name, .nav-label, .nav button span, .side-project, .side-bottom .profile > div { display: none; } .nav { width: 100%; } .nav button { justify-content: center; padding: 11px 0; } .side-bottom { padding: 13px 0 0; } .profile { justify-content: center; } .workspace { grid-template-columns: minmax(0, 1.35fr) minmax(255px, .8fr); } .content { padding: 22px 20px; } .topbar { padding: 0 20px; } }
@@ -192,6 +214,7 @@
         <p class="nav-label">Workspace</p>
         <nav class="nav">
           <button class="active" type="button" aria-label="Dataset" data-view="dataset"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg><span>Dataset</span></button>
+          <button type="button" aria-label="Live camera" data-view="live"><svg viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3v12H4zM12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/></svg><span>Live camera</span></button>
           <button type="button" aria-label="Reconstruction" data-view="reconstruction"><svg viewBox="0 0 24 24"><path d="M4 17 9 7l4 6 3-4 4 8H4zM7 19h10"/></svg><span>Reconstruction</span></button>
           <button type="button" aria-label="Archive"><svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zM6 9v10h12V9M9 13h6"/></svg><span>Archive</span></button>
         </nav>
@@ -205,7 +228,7 @@
 
     <main>
       <header class="topbar">
-        <div class="crumb">Fieldwork <span aria-hidden="true">/</span> Qasr al-Farid <span aria-hidden="true">/</span> <b>Training images</b></div>
+        <div class="crumb">Fieldwork <span aria-hidden="true">/</span> Qasr al-Farid <span aria-hidden="true">/</span> <b id="currentViewName">Training images</b></div>
         <div class="top-actions"><span class="sync"><i></i> Local workspace</span><button class="icon-btn" id="saveBtn" type="button" aria-label="Save record" title="Save record"><svg viewBox="0 0 24 24"><path d="M5 4h12l3 3v13H4V4h1zm3 0v6h8V4M8 20v-7h8v7"/></svg></button></div>
       </header>
 
@@ -237,6 +260,28 @@
               <button class="dataset-button primary" id="saveSamplesForm" type="submit" disabled>Save selected images</button>
               <p class="label-help">Stored only in this browser on this device. Export a dataset bundle for backup. These are image-level labels; pixel-by-pixel damage masks are not included.</p>
             </form>
+          </div>
+        </section>
+        <section id="liveView" aria-label="Live camera monitor" hidden>
+          <div class="page-heading">
+            <div><div class="eyebrow">Robot telemetry · local Wi-Fi</div><h1>Live camera</h1><p class="subtitle">ESP32-CAM stream and connection diagnostics.</p></div>
+          </div>
+          <div class="live-layout">
+            <section class="panel live-feed-panel" aria-label="Camera video feed">
+              <div class="panel-head"><div><h2 class="panel-title">ESP32-CAM stream</h2><span class="panel-kicker">MJPEG · proxied through the local Python backend</span></div><span class="format-tag">LIVE</span></div>
+              <img class="live-feed" id="cameraFeed" alt="Live video from the ESP32 camera" hidden>
+              <div class="live-placeholder" id="cameraPlaceholder"><strong>Camera disconnected</strong><span>Connect the ESP32-CAM to the same Wi-Fi network as this laptop.</span></div>
+              <div class="live-controls"><button class="dataset-button primary" id="connectCamera" type="button">Connect stream</button><button class="dataset-button" id="stopCamera" type="button" disabled>Stop</button><small id="cameraMessage">No camera connection active</small></div>
+            </section>
+            <aside class="live-readouts" aria-label="Camera and AI diagnostics">
+              <div class="panel live-stat"><small>Stream status</small><strong class="live-state" id="cameraState" data-state="idle">Idle</strong></div>
+              <div class="panel live-stat"><small>Frame resolution</small><strong id="cameraResolution">—</strong></div>
+              <div class="panel live-stat"><small>Approx. frame rate</small><strong id="cameraFps">—</strong></div>
+              <div class="panel live-stat"><small>Frames received</small><strong id="cameraFrames">0</strong></div>
+              <div class="panel live-stat"><small>Damage model</small><strong>Not connected</strong></div>
+              <div class="panel live-stat"><small>Robot commands</small><strong>Disabled</strong></div>
+              <div class="live-note"><strong>Prototype status.</strong> The live feed is real when the camera is connected. Detection, severity scoring, and physical commands are not implemented; no restoration action is sent to the robot.</div>
+            </aside>
           </div>
         </section>
         <div id="reconstructionView" hidden>
@@ -625,13 +670,96 @@
     });
     document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
     document.getElementById('recordBtn').addEventListener('click', () => showToast('Field record export is not connected in this prototype.'));
+    const cameraApiBase = 'http://127.0.0.1:8000';
+    const cameraFeed = document.getElementById('cameraFeed');
+    const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+    let cameraPollTimer;
+
+    async function refreshCameraStatus() {
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/camera/status`);
+        if (!response.ok) throw new Error(`Backend returned HTTP ${response.status}`);
+        const status = await response.json();
+        const state = status.state || 'idle';
+        const stateLabel = state === 'streaming' ? 'Streaming' : state === 'connecting' ? 'Connecting' : state === 'error' ? 'Connection error' : state === 'stopped' ? 'Stopped' : 'Idle';
+        const stateElement = document.getElementById('cameraState');
+        stateElement.textContent = stateLabel;
+        stateElement.dataset.state = state;
+        document.getElementById('cameraResolution').textContent = status.width && status.height ? `${status.width} × ${status.height} px` : '—';
+        document.getElementById('cameraFps').textContent = status.fps ? `${status.fps} fps` : '—';
+        document.getElementById('cameraFrames').textContent = status.frames_received || 0;
+        if (state === 'streaming') {
+          cameraPlaceholder.hidden = true;
+          cameraFeed.hidden = false;
+          document.getElementById('cameraMessage').textContent = 'Receiving frames';
+        } else if (state === 'error') {
+          cameraPlaceholder.hidden = false;
+          cameraFeed.hidden = true;
+          cameraPlaceholder.querySelector('strong').textContent = 'Camera unavailable';
+          cameraPlaceholder.querySelector('span').textContent = status.error || 'Check the ESP32 stream URL and Wi-Fi connection.';
+          document.getElementById('cameraMessage').textContent = 'Check camera URL and Wi-Fi';
+          document.getElementById('connectCamera').disabled = false;
+          document.getElementById('stopCamera').disabled = true;
+          clearInterval(cameraPollTimer);
+        } else if (state === 'idle' || state === 'stopped') {
+          document.getElementById('cameraMessage').textContent = state === 'idle' ? 'No camera connection active' : 'Stream stopped';
+        }
+      } catch {
+        document.getElementById('cameraState').textContent = 'Backend offline';
+        document.getElementById('cameraState').dataset.state = 'error';
+        document.getElementById('cameraMessage').textContent = 'Start the local Python backend';
+        cameraFeed.hidden = true;
+        cameraPlaceholder.hidden = false;
+        cameraPlaceholder.querySelector('strong').textContent = 'Backend unavailable';
+        cameraPlaceholder.querySelector('span').textContent = 'Start the local Python API, then reconnect.';
+        document.getElementById('connectCamera').disabled = false;
+        document.getElementById('stopCamera').disabled = true;
+        clearInterval(cameraPollTimer);
+      }
+    }
+
+    document.getElementById('connectCamera').addEventListener('click', () => {
+      clearInterval(cameraPollTimer);
+      cameraPlaceholder.hidden = false;
+      cameraPlaceholder.querySelector('strong').textContent = 'Connecting to camera…';
+      cameraPlaceholder.querySelector('span').textContent = 'Waiting for the configured ESP32-CAM stream.';
+      cameraFeed.hidden = false;
+      cameraFeed.src = `${cameraApiBase}/api/v1/camera/stream?start=${Date.now()}`;
+      document.getElementById('connectCamera').disabled = true;
+      document.getElementById('stopCamera').disabled = false;
+      document.getElementById('cameraMessage').textContent = 'Opening local camera stream';
+      refreshCameraStatus();
+      cameraPollTimer = setInterval(refreshCameraStatus, 1000);
+    });
+
+    document.getElementById('stopCamera').addEventListener('click', () => {
+      clearInterval(cameraPollTimer);
+      cameraFeed.removeAttribute('src');
+      cameraFeed.hidden = true;
+      cameraPlaceholder.hidden = false;
+      cameraPlaceholder.querySelector('strong').textContent = 'Camera disconnected';
+      cameraPlaceholder.querySelector('span').textContent = 'Connect the ESP32-CAM to the same Wi-Fi network as this laptop.';
+      document.getElementById('connectCamera').disabled = false;
+      document.getElementById('stopCamera').disabled = true;
+      document.getElementById('cameraState').textContent = 'Stopped';
+      document.getElementById('cameraState').dataset.state = 'stopped';
+      document.getElementById('cameraMessage').textContent = 'Stream stopped';
+    });
+
+    cameraFeed.addEventListener('error', () => {
+      cameraPlaceholder.hidden = false;
+      cameraFeed.hidden = true;
+    });
     document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => {
       document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active'));
       button.classList.add('active');
       const view = button.getAttribute('data-view');
       if (view) {
         document.getElementById('datasetView').hidden = view !== 'dataset';
+        document.getElementById('liveView').hidden = view !== 'live';
         document.getElementById('reconstructionView').hidden = view !== 'reconstruction';
+        document.getElementById('currentViewName').textContent = view === 'dataset' ? 'Training images' : view === 'live' ? 'Live camera' : 'South facade';
+        if (view === 'live') refreshCameraStatus();
       } else {
         showToast(`${button.getAttribute('aria-label')} view is not connected yet.`);
       }
