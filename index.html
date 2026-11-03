@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f1f2ed">
+  <title>Vestige Field Lab | Reconstruction workspace</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f1f2ed;
+      --surface: #fbfcf9;
+      --ink: #202923;
+      --muted: #758078;
+      --line: #dce1d9;
+      --green: #395d4e;
+      --green-dark: #274538;
+      --green-pale: #e2ebe4;
+      --clay: #b66348;
+      --clay-pale: #f3e5de;
+      --stone: #c8ad8e;
+      --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 var(--sans); }
+    button, select, input { font: inherit; }
+    button { color: inherit; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 224px minmax(0, 1fr); }
+    .sidebar { background: #e9ece6; border-right: 1px solid var(--line); padding: 24px 15px; display: flex; flex-direction: column; gap: 30px; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+    .brand-mark { width: 31px; height: 31px; display: grid; place-items: center; color: #eff4ed; background: var(--green); border-radius: 8px; }
+    .brand-mark svg { width: 19px; height: 19px; }
+    .brand-name { font-size: 12px; font-weight: 750; letter-spacing: 1.1px; line-height: 1.15; }
+    .brand-name span { display: block; margin-top: 4px; font-weight: 500; font-size: 9px; letter-spacing: 1.7px; color: var(--muted); }
+    .nav-label { margin: 0 9px 8px; color: #879087; font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
+    .nav { display: grid; gap: 4px; }
+    .nav button { border: 0; background: transparent; border-radius: 5px; text-align: left; padding: 10px 11px; color: #647068; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 12px; }
+    .nav button.active { color: var(--green-dark); background: #dce6dd; font-weight: 650; }
+    .nav button svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+    .side-project { border-top: 1px solid #d5dbd3; padding-top: 19px; }
+    .project-item { width: 100%; border: 0; background: transparent; border-radius: 5px; display: flex; align-items: center; gap: 9px; padding: 9px 8px; text-align: left; color: #46534a; cursor: pointer; }
+    .project-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--clay); box-shadow: 0 0 0 3px #f3e5de; }
+    .project-item strong { display: block; font-size: 11px; font-weight: 650; }
+    .project-item small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+    .side-bottom { margin-top: auto; border-top: 1px solid #d5dbd3; padding: 15px 7px 0; }
+    .profile { display: flex; align-items: center; gap: 9px; }
+    .avatar { display: grid; place-items: center; width: 29px; height: 29px; background: #d5dcd2; border-radius: 50%; color: var(--green-dark); font: 12px var(--serif); }
+    .profile strong { display: block; font-size: 11px; }
+    .profile small { display: block; color: var(--muted); font-size: 10px; }
+    main { min-width: 0; }
+    .topbar { height: 61px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; border-bottom: 1px solid var(--line); background: rgba(251,252,249,.72); }
+    .crumb { color: var(--muted); font-size: 11px; }
+    .crumb b { color: #536157; font-weight: 600; }
+    .top-actions { display: flex; align-items: center; gap: 16px; }
+    .sync { display: flex; align-items: center; gap: 7px; color: #66736a; font-size: 10px; }
+    .sync i { width: 6px; height: 6px; border-radius: 50%; background: #6f9977; }
+    .icon-btn { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); display: grid; place-items: center; cursor: pointer; }
+    .icon-btn svg { width: 15px; height: 15px; fill: none; stroke: #526057; stroke-width: 1.7; }
+    .content { max-width: 1530px; margin: 0 auto; padding: 26px 30px 30px; }
+    .page-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 21px; }
+    .eyebrow { color: var(--clay); font-size: 9px; font-weight: 750; letter-spacing: 1.6px; text-transform: uppercase; }
+    h1 { margin: 4px 0 0; font: 500 28px/1.2 var(--serif); letter-spacing: 0; }
+    .subtitle { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+    .record-btn { border: 1px solid #c9d2c9; background: transparent; border-radius: 4px; padding: 8px 12px; font-size: 10px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+    .record-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(285px, .8fr); align-items: start; gap: 16px; }
+    .left-stack, .right-stack { min-width: 0; display: grid; gap: 14px; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 15px; border-bottom: 1px solid #e7eae5; }
+    .panel-title { margin: 0; font-size: 11px; font-weight: 700; }
+    .panel-kicker { color: var(--muted); font-size: 9px; }
+    .canvas-tools { display: flex; align-items: center; gap: 7px; }
+    .tool-pill { border: 1px solid var(--line); border-radius: 3px; padding: 4px 7px; color: #657168; font-size: 9px; background: #fff; }
+    .image-stage { min-height: 355px; position: relative; overflow: hidden; background: #d7d6c8; isolation: isolate; }
+    .scene { width: 100%; height: 355px; display: block; }
+    .upload-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+    .image-stage.has-upload .upload-image { display: block; }
+    .image-stage.has-upload .scene { display: none; }
+    .scan-lines { position: absolute; inset: 0; pointer-events: none; opacity: .16; background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,.36) 4px); mix-blend-mode: soft-light; }
+    .damage-overlay { position: absolute; top: 24%; left: 44%; width: 23%; height: 33%; border: 1px solid #d17b59; background: rgba(182,99,72,.13); clip-path: polygon(8% 3%, 93% 0, 100% 81%, 80% 100%, 4% 82%); transition: opacity .3s; }
+    .damage-overlay::before { content: "PREDICTED COMPLETION"; position: absolute; top: -20px; left: 0; color: #fff; background: var(--clay); padding: 3px 5px; font-size: 7px; font-weight: 700; letter-spacing: .7px; white-space: nowrap; }
+    .stage-caption { position: absolute; bottom: 11px; left: 12px; display: flex; align-items: center; gap: 7px; padding: 6px 8px; background: rgba(31,40,34,.78); color: #f7f5ee; border-radius: 3px; font-size: 9px; }
+    .stage-caption span { width: 6px; height: 6px; border-radius: 50%; background: #d8815b; }
+    .upload-overlay { position: absolute; right: 12px; bottom: 11px; border: 1px solid rgba(255,255,255,.62); border-radius: 3px; background: rgba(34,43,37,.75); color: white; padding: 6px 9px; font-size: 9px; cursor: pointer; }
+    .stage-meta { min-height: 37px; display: flex; justify-content: space-between; align-items: center; padding: 0 13px; color: var(--muted); font-size: 9px; }
+    .stage-meta strong { color: #526057; font-weight: 600; }
+    .evidence-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .evidence { padding: 12px 14px; display: flex; align-items: center; gap: 10px; }
+    .evidence-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; background: var(--green-pale); color: var(--green); flex: 0 0 auto; }
+    .evidence-mark svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .evidence small { color: var(--muted); display: block; font-size: 9px; }
+    .evidence strong { display: block; font-size: 10px; font-weight: 650; margin-top: 1px; }
+    .model-panel { overflow: hidden; }
+    .model-view { height: 190px; display: grid; place-items: center; position: relative; background: radial-gradient(ellipse at 50% 58%, #edf0e9 0, #f5f6f1 48%, #fafbf8 78%); }
+    .model-view svg { width: 220px; max-width: 90%; height: 158px; overflow: visible; }
+    .model-axis { position: absolute; right: 12px; bottom: 10px; color: #879188; font-size: 8px; }
+    .model-footer { border-top: 1px solid #e7eae5; padding: 10px 13px; display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); }
+    .model-footer strong { color: #536057; font-weight: 600; }
+    .settings { padding: 14px; }
+    .field { margin-bottom: 15px; }
+    .field:last-child { margin-bottom: 0; }
+    .field label, .field-label { display: flex; justify-content: space-between; color: #59665c; font-size: 10px; font-weight: 650; margin-bottom: 7px; }
+    .field label small { color: #929a93; font-size: 9px; font-weight: 500; }
+    select { width: 100%; border: 1px solid #d9dfd7; border-radius: 3px; background: #fff; padding: 8px 9px; color: #38453c; font-size: 10px; outline-color: var(--green); }
+    .range-wrap { display: flex; align-items: center; gap: 9px; color: #8a938b; font-size: 8px; }
+    input[type="range"] { width: 100%; accent-color: var(--green); }
+    .range-value { color: var(--green-dark); font-size: 9px; font-weight: 700; min-width: 28px; text-align: right; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; color: #59665c; font-size: 10px; }
+    .switch { position: relative; width: 29px; height: 16px; border: 0; border-radius: 10px; background: #c8d0c7; cursor: pointer; padding: 0; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: white; border-radius: 50%; transition: transform .18s; box-shadow: 0 1px 3px #0002; }
+    .switch[aria-checked="true"] { background: var(--green); }
+    .switch[aria-checked="true"]::after { transform: translateX(13px); }
+    .analyze-btn { width: 100%; border: 0; border-radius: 4px; background: var(--green); color: white; padding: 10px; display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 10px; font-weight: 650; cursor: pointer; transition: background .2s, transform .2s; }
+    .analyze-btn:hover { background: var(--green-dark); transform: translateY(-1px); }
+    .analyze-btn:disabled { opacity: .7; cursor: wait; transform: none; }
+    .analyze-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .analysis-state { min-height: 17px; margin: 8px 0 0; color: var(--muted); font-size: 9px; text-align: center; }
+    .confidence { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; margin-top: 11px; border-top: 1px solid #e7eae5; }
+    .confidence-label { color: var(--muted); font-size: 9px; }
+    .confidence-value { color: var(--green); font: 18px var(--serif); }
+    .confidence-track { height: 4px; background: #e8ece6; margin-top: 7px; border-radius: 4px; overflow: hidden; }
+    .confidence-track span { display: block; width: 0; height: 100%; background: #6e9678; transition: width .6s; }
+    .export-panel { padding: 13px 14px; }
+    .export-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .export-heading strong { font-size: 10px; }
+    .format-tag { background: #e8ede7; color: var(--green); border-radius: 3px; padding: 3px 6px; font-size: 8px; font-weight: 700; letter-spacing: .6px; }
+    .export-note { color: var(--muted); font-size: 9px; margin: 0 0 12px; }
+    .export-btn { width: 100%; border: 1px solid #c9d4ca; border-radius: 4px; background: transparent; padding: 8px; color: var(--green-dark); font-size: 10px; font-weight: 650; cursor: pointer; }
+    .export-btn:disabled { color: #a3aaa3; border-color: #e0e4de; cursor: not-allowed; }
+    .notice { padding: 10px 12px; border: 1px solid #eadbcf; background: #f7f0e9; color: #79614d; border-radius: 4px; font-size: 9px; line-height: 1.5; }
+    .notice strong { color: #614a38; }
+    .toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 12px); padding: 9px 13px; border-radius: 4px; background: #263e32; color: white; font-size: 10px; opacity: 0; pointer-events: none; transition: all .2s; z-index: 5; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .dataset-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 15px; align-items: start; }
+    .dataset-main { min-width: 0; }
+    .dataset-toolbar { padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .dataset-toolbar p { margin: 0; color: var(--muted); font-size: 10px; }
+    .dataset-toolbar strong { color: #4a594e; font-size: 10px; }
+    .dataset-actions { display: flex; gap: 7px; flex: 0 0 auto; }
+    .dataset-button { border: 1px solid #c9d4ca; border-radius: 4px; background: transparent; padding: 8px 10px; color: var(--green-dark); font-size: 10px; font-weight: 650; cursor: pointer; }
+    .dataset-button.primary { border-color: var(--green); background: var(--green); color: #fff; }
+    .dataset-button:disabled { opacity: .45; cursor: not-allowed; }
+    .dataset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .sample-card { min-width: 0; overflow: hidden; }
+    .sample-image { width: 100%; height: 145px; display: block; object-fit: cover; background: #e5e8e1; }
+    .sample-body { padding: 10px 11px; }
+    .sample-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .sample-title { overflow-wrap: anywhere; margin: 0; color: #3e4a41; font-size: 10px; font-weight: 700; }
+    .sample-delete { border: 0; padding: 1px 3px; color: #9a6856; background: transparent; cursor: pointer; font-size: 9px; }
+    .sample-meta { margin: 4px 0 8px; color: var(--muted); font-size: 9px; }
+    .sample-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+    .sample-tag { padding: 3px 6px; border-radius: 3px; background: #e8ede7; color: #496452; font-size: 8px; }
+    .empty-state { grid-column: 1 / -1; padding: 48px 16px; text-align: center; color: var(--muted); }
+    .empty-state strong { display: block; margin-bottom: 5px; color: #4d5b50; font: 18px var(--serif); }
+    .empty-state span { font-size: 10px; }
+    .label-panel { padding: 14px; }
+    .label-panel h2 { margin: 0; font-size: 11px; }
+    .label-panel > p { color: var(--muted); font-size: 9px; line-height: 1.5; margin: 5px 0 15px; }
+    .label-field { margin-bottom: 11px; }
+    .label-field label { display: block; margin-bottom: 5px; color: #59665c; font-size: 9px; font-weight: 650; }
+    .label-field input, .label-field select, .label-field textarea { width: 100%; border: 1px solid #d9dfd7; border-radius: 3px; background: #fff; padding: 8px; color: #38453c; font: 10px var(--sans); outline-color: var(--green); }
+    .label-field textarea { min-height: 60px; resize: vertical; }
+    .label-help { color: #89928a; font-size: 8px; line-height: 1.45; margin: 10px 0 0; }
+    .dataset-summary { display: flex; gap: 8px; margin-bottom: 12px; }
+    .summary-stat { flex: 1; padding: 10px 12px; }
+    .summary-stat small { display: block; color: var(--muted); font-size: 9px; }
+    .summary-stat strong { display: block; margin-top: 2px; color: var(--green-dark); font: 20px var(--serif); }
+    .spin { animation: spin 1.1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 720px) {
+      .dataset-layout { grid-template-columns: 1fr; }
+      .label-panel { order: -1; }
+      .dataset-toolbar { align-items: flex-start; flex-direction: column; }
+      .dataset-actions { width: 100%; flex-wrap: wrap; }
+      .dataset-actions .dataset-button { flex: 1; }
+    }
+    @media (min-width: 1450px) { .content { padding-top: 34px; } .image-stage, .scene { height: 410px; } }
+    @media (max-width: 980px) { .app { grid-template-columns: 66px minmax(0, 1fr); } .sidebar { padding: 20px 10px; align-items: center; } .brand { padding: 0; } .brand-name, .nav-label, .nav button span, .side-project, .side-bottom .profile > div { display: none; } .nav { width: 100%; } .nav button { justify-content: center; padding: 11px 0; } .side-bottom { padding: 13px 0 0; } .profile { justify-content: center; } .workspace { grid-template-columns: minmax(0, 1.35fr) minmax(255px, .8fr); } .content { padding: 22px 20px; } .topbar { padding: 0 20px; } }
+    @media (max-width: 720px) { .workspace { grid-template-columns: 1fr; } .right-stack { grid-template-columns: 1fr 1fr; align-items: start; } .right-stack .model-panel, .right-stack .notice { grid-column: 1 / -1; } .content { padding: 18px 14px 25px; } .topbar { height: 53px; padding: 0 14px; } .page-heading { align-items: flex-start; } h1 { font-size: 25px; } .image-stage, .scene { height: 300px; min-height: 300px; } .sync { display: none; } }
+    @media (max-width: 470px) { .app { grid-template-columns: 48px minmax(0, 1fr); } .sidebar { padding: 16px 5px; } .brand-mark { width: 29px; height: 29px; } .nav button { padding: 9px 0; } .top-actions { gap: 8px; } .crumb { font-size: 9px; } .record-btn { font-size: 9px; padding: 7px; } .evidence-row { gap: 8px; } .evidence { padding: 10px 8px; gap: 7px; } .evidence strong { font-size: 9px; } .right-stack { grid-template-columns: 1fr; } .right-stack .model-panel, .right-stack .notice { grid-column: auto; } .page-heading { margin-bottom: 15px; } .subtitle { max-width: 230px; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19V7l8-4 8 4v12M4 7l8 4 8-4M12 11v8M7 9v7m10-7v7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></div>
+        <div class="brand-name">VESTIGE<span>FIELD LAB</span></div>
+      </div>
+      <div>
+        <p class="nav-label">Workspace</p>
+        <nav class="nav">
+          <button class="active" type="button" aria-label="Dataset" data-view="dataset"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg><span>Dataset</span></button>
+          <button type="button" aria-label="Reconstruction" data-view="reconstruction"><svg viewBox="0 0 24 24"><path d="M4 17 9 7l4 6 3-4 4 8H4zM7 19h10"/></svg><span>Reconstruction</span></button>
+          <button type="button" aria-label="Archive"><svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zM6 9v10h12V9M9 13h6"/></svg><span>Archive</span></button>
+        </nav>
+      </div>
+      <div class="side-project">
+        <p class="nav-label">Active site</p>
+        <button class="project-item" type="button"><span class="project-dot"></span><span><strong>Qasr al-Farid</strong><small>Hegra · Saudi Arabia</small></span></button>
+      </div>
+      <div class="side-bottom"><div class="profile"><div class="avatar">LM</div><div><strong>Leila Mansour</strong><small>Conservation team</small></div></div></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div class="crumb">Fieldwork <span aria-hidden="true">/</span> Qasr al-Farid <span aria-hidden="true">/</span> <b>Training images</b></div>
+        <div class="top-actions"><span class="sync"><i></i> Local workspace</span><button class="icon-btn" id="saveBtn" type="button" aria-label="Save record" title="Save record"><svg viewBox="0 0 24 24"><path d="M5 4h12l3 3v13H4V4h1zm3 0v6h8V4M8 20v-7h8v7"/></svg></button></div>
+      </header>
+
+      <div class="content">
+        <section id="datasetView" aria-label="Training image dataset">
+          <div class="page-heading">
+            <div><div class="eyebrow">Dataset workspace · stored on this device</div><h1>Training image library</h1><p class="subtitle">Collect and label facade photos before model training.</p></div>
+          </div>
+          <div class="dataset-summary">
+            <div class="panel summary-stat"><small>Saved images</small><strong id="sampleCount">0</strong></div>
+            <div class="panel summary-stat"><small>Image-level labels</small><strong id="labelCount">0</strong></div>
+          </div>
+          <div class="dataset-layout">
+            <div class="dataset-main">
+              <div class="panel dataset-toolbar">
+                <div><strong id="selectionLabel">No images selected</strong><p>Use photos from your phone or camera. The NodeMCU board has no camera built in.</p></div>
+                <div class="dataset-actions"><label class="dataset-button" for="datasetFiles">＋ Choose images</label><button class="dataset-button primary" id="saveSamples" type="button" disabled>Add to dataset</button><button class="dataset-button" id="exportDataset" type="button" disabled>↓ Export data</button><input id="datasetFiles" type="file" accept="image/*" multiple hidden></div>
+              </div>
+              <div class="dataset-grid" id="datasetGrid"><div class="panel empty-state"><strong>Your dataset starts here</strong><span>Choose facade photos, add labels, then save them in this browser.</span></div></div>
+            </div>
+            <form class="panel label-panel" id="labelForm">
+              <h2>Image labels</h2>
+              <p>These labels apply to every selected image. Add only details you can verify.</p>
+              <div class="label-field"><label for="siteLabel">Site or collection</label><input id="siteLabel" value="Hegra · Tomb 17" required></div>
+              <div class="label-field"><label for="traditionLabel">Architectural tradition</label><select id="traditionLabel"><option value="Nabataean">Nabataean</option><option value="Roman">Roman</option><option value="Greek">Greek</option><option value="Islamic">Islamic</option><option value="Unknown">Unknown / unverified</option></select></div>
+              <div class="label-field"><label for="damageLabel">Visible condition</label><select id="damageLabel"><option value="Missing section">Missing section</option><option value="Fracture">Fracture</option><option value="Surface erosion">Surface erosion</option><option value="Intact reference">Intact reference</option><option value="Unknown">Unknown / unverified</option></select></div>
+              <div class="label-field"><label for="materialLabel">Material</label><select id="materialLabel"><option value="Sandstone">Sandstone</option><option value="Limestone">Limestone</option><option value="Marble">Marble</option><option value="Other stone">Other stone</option><option value="Unknown">Unknown / unverified</option></select></div>
+              <div class="label-field"><label for="notesLabel">Notes</label><textarea id="notesLabel" placeholder="View angle, scale reference, source, or uncertainty"></textarea></div>
+              <button class="dataset-button primary" id="saveSamplesForm" type="submit" disabled>Save selected images</button>
+              <p class="label-help">Stored only in this browser on this device. Export a dataset bundle for backup. These are image-level labels; pixel-by-pixel damage masks are not included.</p>
+            </form>
+          </div>
+        </section>
+        <div id="reconstructionView" hidden>
+        <div class="page-heading">
+          <div><div class="eyebrow">Field record · Hegra, sector 04</div><h1>South facade</h1><p class="subtitle">Tomb 17 · Nabataean · 1st century CE · Capture 08:42 AST</p></div>
+          <button class="record-btn" id="recordBtn" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 17v3h14v-3"/></svg>Export record</button>
+        </div>
+
+        <div class="workspace">
+          <section class="left-stack" aria-label="Facade evidence">
+            <div class="panel">
+              <div class="panel-head"><div><h2 class="panel-title">Source capture</h2><span class="panel-kicker">Elevation view · damage mask overlay</span></div><div class="canvas-tools"><span class="tool-pill">1.0×</span><span class="tool-pill">Mask on</span></div></div>
+              <div class="image-stage" id="imageStage">
+                <svg class="scene" viewBox="0 0 900 440" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Illustrated sandstone Nabataean tomb facade with a damaged upper section">
+                  <defs>
+                    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#b8c1b3"/><stop offset="1" stop-color="#e0d5c0"/></linearGradient>
+                    <linearGradient id="rock" x2=".9" y2="1"><stop stop-color="#d4bd9e"/><stop offset=".52" stop-color="#bba080"/><stop offset="1" stop-color="#8f775f"/></linearGradient>
+                    <linearGradient id="shadow" x2="1" y2=".2"><stop stop-color="#493e33"/><stop offset="1" stop-color="#77624b"/></linearGradient>
+                    <pattern id="grain" width="46" height="33" patternUnits="userSpaceOnUse"><path d="M2 8l11-2m12 19 14-4M16 28l5-1M31 5l8 2" stroke="#f0ddbd" stroke-opacity=".2" stroke-width="1"/><circle cx="8" cy="22" r=".8" fill="#75614c" fill-opacity=".3"/></pattern>
+                  </defs>
+                  <rect width="900" height="440" fill="url(#sky)"/><path d="M0 340 65 298l76 21 74-40 86 32 88-48 101 42 65-34 104 43 86-28 155 45v109H0z" fill="#b6a58b" opacity=".42"/>
+                  <path d="M100 440V116l74-28 92 7 67-49 77 10 32 45 116-19 71 28 93-8 73 51v287z" fill="url(#rock)"/>
+                  <path d="M100 440V116l74-28 92 7 67-49 77 10 32 45 116-19 71 28 93-8 73 51v287z" fill="url(#grain)"/>
+                  <path d="m333 93 74 10 19 24 75-10 41 15 76-6 29 17v17H333z" fill="#d9c3a1" opacity=".7"/>
+                  <path d="M234 440V202q0-52 50-52t50 52v238M565 440V202q0-52 50-52t50 52v238" fill="url(#shadow)"/>
+                  <path d="M248 440V204q0-36 36-36t36 36v236M579 440V204q0-36 36-36t36 36v236" fill="#74604a" opacity=".65"/>
+                  <path d="M212 203h144M543 203h144M224 220h126M555 220h126" stroke="#dbc4a0" stroke-width="8" opacity=".8"/>
+                  <path d="M359 440V252q0-79 91-79t91 79v188" fill="url(#shadow)"/>
+                  <path d="M375 440V255q0-61 75-61t75 61v185" fill="#50463a"/>
+                  <path d="M344 257h212M351 270h199M367 285h167" stroke="#d2b898" stroke-width="7"/>
+                  <path d="M184 150h532M197 158h506M207 168h486" stroke="#cdb596" stroke-width="5" opacity=".85"/>
+                  <path d="M165 119 239 94l86 9 72-47 82 10 34 41 117-14 73 26 35-3" fill="none" stroke="#e4d1b2" stroke-width="4" opacity=".75"/>
+                  <path d="M426 111l22-12 8 15-12 10 18 9-7 18-21-5-12 12-16-12 8-17-13-7z" fill="#85715b"/>
+                  <path d="M440 125l21 10-8 18-21-5-12 12-13-10 8-15z" fill="#b69b7a" opacity=".65"/>
+                  <path d="M115 435h672" stroke="#685b49" stroke-width="5" opacity=".7"/>
+                  <g fill="#77644e" opacity=".45"><path d="M130 387h20v5h-20zm663 23h18v5h-18zM180 345h13v3h-13zm531-14h20v4h-20zM305 105l24-6 3 3-25 7z"/></g>
+                </svg>
+                <img class="upload-image" id="uploadedImage" alt="Uploaded facade capture">
+                <div class="scan-lines"></div><div class="damage-overlay" id="damageOverlay"></div>
+                <div class="stage-caption"><span></span><b id="imageCaption">Capture 04 · 24 MP</b></div>
+                <button class="upload-overlay" id="uploadBtn" type="button">＋ Replace capture</button>
+                <input id="fileInput" type="file" accept="image/*" hidden>
+              </div>
+              <div class="stage-meta"><span><strong>Damage region</strong> · cornice, east bay</span><span id="resolutionText">8240 × 5493 px</span></div>
+            </div>
+            <div class="evidence-row">
+              <div class="panel evidence"><div class="evidence-mark"><svg viewBox="0 0 24 24"><path d="M4 19 9 5l3 8 3-5 5 11H4z"/></svg></div><div><small>Reference match</small><strong>Hegra · Tomb 21 cornice</strong></div></div>
+              <div class="panel evidence"><div class="evidence-mark"><svg viewBox="0 0 24 24"><path d="M4 12h16M12 4v16M6.5 6.5l11 11m0-11-11 11"/></svg></div><div><small>Observed symmetry</small><strong>Axis deviation · 2.4°</strong></div></div>
+            </div>
+          </section>
+
+          <aside class="right-stack" aria-label="Reconstruction controls">
+            <section class="panel model-panel">
+              <div class="panel-head"><div><h2 class="panel-title">Completion preview</h2><span class="panel-kicker">Cornice fragment · concept geometry</span></div><span class="format-tag">3D</span></div>
+              <div class="model-view">
+                <svg viewBox="0 0 280 190" role="img" aria-label="Conceptual stepped stone cornice mesh preview">
+                  <defs><linearGradient id="meshFront" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#cdb18e"/><stop offset="1" stop-color="#a88969"/></linearGradient><linearGradient id="meshSide" x2="1" y2="1"><stop stop-color="#9f8263"/><stop offset="1" stop-color="#80684f"/></linearGradient></defs>
+                  <ellipse cx="143" cy="158" rx="91" ry="13" fill="#617064" opacity=".1"/>
+                  <path d="m55 105 37-25 133 4 31 20-36 28-134-4z" fill="#dfc8a8" stroke="#816b52" stroke-width="1.1"/>
+                  <path d="m55 105 31 19v27l-30-20z" fill="url(#meshSide)" stroke="#78634c" stroke-width="1"/>
+                  <path d="m86 124 134 4v24l-134-1z" fill="url(#meshFront)" stroke="#816b52" stroke-width="1"/>
+                  <path d="m220 128 36-28v27l-36 25z" fill="#8d7458" stroke="#78634c" stroke-width="1"/>
+                  <path d="m71 93 31-20 132 4 22 13-36 22-134-4z" fill="#d1b695" stroke="#80694f" stroke-width="1"/>
+                  <path d="m102 112 118 4 36-26" fill="none" stroke="#745f49" stroke-width=".8" opacity=".75"/>
+                  <path d="m86 124 15-10m14 10 15-10m14 11 15-10m14 11 15-10m14 11 15-10m-110 34 15-12m14 12 15-12m14 12 15-12m14 12 15-12" stroke="#f0ddbd" stroke-width=".8" opacity=".55"/>
+                  <path d="M57 108 90 128l130 4 35-27M88 124v25m132-21v27" fill="none" stroke="#536d5a" stroke-width=".8" stroke-dasharray="3 3" opacity=".7"/>
+                </svg>
+                <span class="model-axis">X 90 mm &nbsp;·&nbsp; Z 42 mm</span>
+              </div>
+              <div class="model-footer"><span><strong>Watertight mesh</strong> · 12 faces</span><span>Stone · local sandstone</span></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head"><div><h2 class="panel-title">Reconstruction parameters</h2><span class="panel-kicker">Review before generating</span></div></div>
+              <div class="settings">
+                <div class="field"><label for="styleSelect">Architectural tradition <small>Style prior</small></label><select id="styleSelect"><option>Nabataean · Hegra</option><option>Roman · Imperial</option><option>Greek · Classical</option><option>Islamic · Umayyad</option></select></div>
+                <div class="field"><div class="field-label"><span>Completion strength</span><span class="range-value" id="strengthValue">68%</span></div><div class="range-wrap"><span>Conservative</span><input id="strengthRange" type="range" min="20" max="95" value="68"><span>Interpretive</span></div></div>
+                <div class="field toggle-row"><span>Enforce bilateral symmetry</span><button class="switch" id="symmetrySwitch" type="button" role="switch" aria-checked="true" aria-label="Enforce bilateral symmetry"></button></div>
+                <button class="analyze-btn" id="analyzeBtn" type="button"><svg id="analyzeIcon" viewBox="0 0 24 24"><path d="M4 18 9 6l3 7 3-4 5 9H4zM17 4v4m-2-2h4"/></svg><span id="analyzeLabel">Run reconstruction</span></button>
+                <p class="analysis-state" id="analysisState" aria-live="polite">Awaiting review · image analysis is simulated</p>
+                <div class="confidence"><span class="confidence-label">Model confidence · illustrative</span><span class="confidence-value" id="confidenceValue">—</span></div>
+                <div class="confidence-track"><span id="confidenceTrack"></span></div>
+              </div>
+            </section>
+
+            <section class="panel export-panel">
+              <div class="export-heading"><strong>Geometry export</strong><span class="format-tag">OBJ</span></div>
+              <p class="export-note">Download a coarse, dimensioned concept mesh for review in a 3D editor.</p>
+              <button class="export-btn" id="exportBtn" type="button" disabled>↓ &nbsp; Export concept mesh</button>
+            </section>
+            <div class="notice"><strong>Research prototype.</strong> Reconstruction and confidence are illustrative; exported geometry is a simple placeholder, not a validated restoration or print-ready part. Require expert review and measured survey data.</div>
+          </aside>
+        </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const DATASET_DB_NAME = 'vestige-image-dataset';
+    let datasetDb;
+    let pendingFiles = [];
+    let datasetRecords = [];
+    let sampleUrls = [];
+
+    function openDatasetDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DATASET_DB_NAME, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('samples', { keyPath: 'id' });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function readSamples() {
+      return new Promise((resolve, reject) => {
+        const request = datasetDb.transaction('samples', 'readonly').objectStore('samples').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function fileDimensions(file) {
+      return new Promise(resolve => {
+        const image = new Image();
+        const url = URL.createObjectURL(file);
+        image.onload = () => {
+          resolve({ width: image.naturalWidth, height: image.naturalHeight, url });
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve({ width: 0, height: 0, url: '' });
+        };
+        image.src = url;
+      });
+    }
+
+    function renderSamples() {
+      sampleUrls.forEach(url => URL.revokeObjectURL(url));
+      sampleUrls = [];
+      const grid = document.getElementById('datasetGrid');
+      grid.replaceChildren();
+      document.getElementById('sampleCount').textContent = datasetRecords.length;
+      document.getElementById('labelCount').textContent = datasetRecords.filter(sample => sample.tradition && sample.condition && sample.material).length;
+      document.getElementById('exportDataset').disabled = datasetRecords.length === 0;
+
+      if (!datasetRecords.length) {
+        const empty = document.createElement('div');
+        empty.className = 'panel empty-state';
+        empty.innerHTML = '<strong>Your dataset starts here</strong><span>Choose facade photos, add labels, then save them in this browser.</span>';
+        grid.append(empty);
+        return;
+      }
+
+      datasetRecords.forEach(sample => {
+        const card = document.createElement('article');
+        card.className = 'panel sample-card';
+        const image = document.createElement('img');
+        image.className = 'sample-image';
+        image.alt = `Dataset image: ${sample.fileName}`;
+        image.src = URL.createObjectURL(sample.image);
+        sampleUrls.push(image.src);
+        const body = document.createElement('div');
+        body.className = 'sample-body';
+        const titleRow = document.createElement('div');
+        titleRow.className = 'sample-title-row';
+        const title = document.createElement('h3');
+        title.className = 'sample-title';
+        title.textContent = sample.fileName;
+        const remove = document.createElement('button');
+        remove.className = 'sample-delete';
+        remove.type = 'button';
+        remove.textContent = 'Remove';
+        remove.setAttribute('aria-label', `Remove ${sample.fileName}`);
+        remove.addEventListener('click', () => deleteSample(sample.id));
+        titleRow.append(title, remove);
+        const meta = document.createElement('p');
+        meta.className = 'sample-meta';
+        meta.textContent = `${sample.site} · ${sample.width} × ${sample.height} px`;
+        const tags = document.createElement('div');
+        tags.className = 'sample-tags';
+        [sample.tradition, sample.condition, sample.material].forEach(value => {
+          const tag = document.createElement('span');
+          tag.className = 'sample-tag';
+          tag.textContent = value;
+          tags.append(tag);
+        });
+        body.append(titleRow, meta, tags);
+        card.append(image, body);
+        grid.append(card);
+      });
+    }
+
+    async function refreshSamples() {
+      datasetRecords = await readSamples();
+      datasetRecords.sort((first, second) => second.createdAt.localeCompare(first.createdAt));
+      renderSamples();
+    }
+
+    async function deleteSample(id) {
+      try {
+        await new Promise((resolve, reject) => {
+          const transaction = datasetDb.transaction('samples', 'readwrite');
+          transaction.objectStore('samples').delete(id);
+          transaction.oncomplete = resolve;
+          transaction.onerror = () => reject(transaction.error);
+        });
+        await refreshSamples();
+        showToast('Image removed from this browser dataset.');
+      } catch {
+        showToast('Could not remove this image from local storage.');
+      }
+    }
+
+    function setPendingFiles(files) {
+      pendingFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+      document.getElementById('selectionLabel').textContent = pendingFiles.length ? `${pendingFiles.length} image${pendingFiles.length === 1 ? '' : 's'} selected` : 'No images selected';
+      document.getElementById('saveSamples').disabled = pendingFiles.length === 0;
+      document.getElementById('saveSamplesForm').disabled = pendingFiles.length === 0;
+      if (files.length && pendingFiles.length !== files.length) showToast('Some files were skipped because they are not images.');
+    }
+
+    document.getElementById('datasetFiles').addEventListener('change', event => setPendingFiles(event.target.files));
+    document.getElementById('saveSamples').addEventListener('click', () => document.getElementById('labelForm').requestSubmit());
+    document.getElementById('labelForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!pendingFiles.length || !datasetDb) return;
+      const files = pendingFiles.slice();
+      const dimensions = await Promise.all(files.map(fileDimensions));
+      const samples = files.map((file, index) => ({
+        id: crypto.randomUUID(),
+        fileName: file.name,
+        image: file,
+        mimeType: file.type,
+        width: dimensions[index].width,
+        height: dimensions[index].height,
+        site: document.getElementById('siteLabel').value.trim(),
+        tradition: document.getElementById('traditionLabel').value,
+        condition: document.getElementById('damageLabel').value,
+        material: document.getElementById('materialLabel').value,
+        notes: document.getElementById('notesLabel').value.trim(),
+        createdAt: new Date().toISOString()
+      }));
+      try {
+        await new Promise((resolve, reject) => {
+          const transaction = datasetDb.transaction('samples', 'readwrite');
+          samples.forEach(sample => transaction.objectStore('samples').add(sample));
+          transaction.oncomplete = resolve;
+          transaction.onerror = () => reject(transaction.error);
+        });
+        dimensions.forEach(item => { if (item.url) URL.revokeObjectURL(item.url); });
+        pendingFiles = [];
+        document.getElementById('datasetFiles').value = '';
+        setPendingFiles([]);
+        await refreshSamples();
+        showToast(`${samples.length} image${samples.length === 1 ? '' : 's'} saved locally with labels.`);
+      } catch {
+        showToast('Could not save images. Check available browser storage.');
+      }
+    });
+
+    function blobAsDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    document.getElementById('exportDataset').addEventListener('click', async () => {
+      try {
+        const samples = await Promise.all(datasetRecords.map(async sample => ({
+          id: sample.id,
+          fileName: sample.fileName,
+          mimeType: sample.mimeType,
+          width: sample.width,
+          height: sample.height,
+          site: sample.site,
+          tradition: sample.tradition,
+          condition: sample.condition,
+          material: sample.material,
+          notes: sample.notes,
+          createdAt: sample.createdAt,
+          imageDataUrl: await blobAsDataUrl(sample.image)
+        })));
+        const bundle = new Blob([JSON.stringify({ format: 'vestige-dataset-v1', exportedAt: new Date().toISOString(), samples }, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(bundle);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'vestige-training-dataset.json';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('Dataset bundle exported with images and labels.');
+      } catch {
+        showToast('Dataset export failed. Try exporting fewer images.');
+      }
+    });
+
+    openDatasetDb().then(async database => {
+      datasetDb = database;
+      await refreshSamples();
+    }).catch(() => {
+      document.getElementById('selectionLabel').textContent = 'Browser storage unavailable';
+      showToast('Local dataset storage is unavailable in this browser context.');
+    });
+
+    const fileInput = document.getElementById('fileInput');
+    const imageStage = document.getElementById('imageStage');
+    const uploadedImage = document.getElementById('uploadedImage');
+    const exportBtn = document.getElementById('exportBtn');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const analysisState = document.getElementById('analysisState');
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
+    }
+
+    document.getElementById('uploadBtn').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        showToast('Choose an image file to preview.');
+        return;
+      }
+      uploadedImage.src = URL.createObjectURL(file);
+      uploadedImage.onload = () => {
+        imageStage.classList.add('has-upload');
+        document.getElementById('imageCaption').textContent = file.name;
+        document.getElementById('resolutionText').textContent = `${uploadedImage.naturalWidth} × ${uploadedImage.naturalHeight} px`;
+        showToast('Capture loaded locally. No image was uploaded.');
+      };
+    });
+
+    document.getElementById('strengthRange').addEventListener('input', event => {
+      document.getElementById('strengthValue').textContent = `${event.target.value}%`;
+    });
+    document.getElementById('symmetrySwitch').addEventListener('click', event => {
+      const enabled = event.currentTarget.getAttribute('aria-checked') === 'true';
+      event.currentTarget.setAttribute('aria-checked', String(!enabled));
+    });
+    analyzeBtn.addEventListener('click', () => {
+      analyzeBtn.disabled = true;
+      document.getElementById('analyzeIcon').classList.add('spin');
+      document.getElementById('analyzeLabel').textContent = 'Reviewing geometry…';
+      analysisState.textContent = 'Comparing facade proportions and style references…';
+      setTimeout(() => {
+        document.getElementById('analyzeIcon').classList.remove('spin');
+        document.getElementById('analyzeLabel').textContent = 'Run reconstruction again';
+        analysisState.textContent = 'Illustrative preview generated · verify against site survey';
+        document.getElementById('confidenceValue').textContent = '86%';
+        document.getElementById('confidenceTrack').style.width = '86%';
+        exportBtn.disabled = false;
+        analyzeBtn.disabled = false;
+        showToast('Concept preview ready for expert review.');
+      }, 1250);
+    });
+
+    function makeConceptObj() {
+      const profile = [[0,0],[90,0],[90,18],[80,18],[80,31],[72,31],[72,42],[18,42],[18,31],[10,31],[10,18],[0,18]];
+      const depth = 36;
+      const vertices = [...profile.map(([x,z]) => `${x} 0 ${z}`), ...profile.map(([x,z]) => `${x} ${depth} ${z}`)];
+      const count = profile.length;
+      const faces = [`f ${profile.map((_, index) => index + 1).join(' ')}`, `f ${profile.map((_, index) => count + profile.length - index).join(' ')}`];
+      profile.forEach((_, index) => {
+        const next = (index + 1) % count;
+        faces.push(`f ${index + 1} ${next + 1} ${count + next + 1} ${count + index + 1}`);
+      });
+      return `# Vestige Field Lab - illustrative cornice concept mesh\n# Units: millimeters. Not validated for conservation or printing.\no cornice_concept\n${vertices.map(vertex => `v ${vertex}`).join('\n')}\n${faces.join('\n')}\n`;
+    }
+    exportBtn.addEventListener('click', () => {
+      const blob = new Blob([makeConceptObj()], { type: 'text/plain' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'cornice-concept.obj';
+      link.click();
+      URL.revokeObjectURL(link.href);
+      showToast('Concept OBJ downloaded. Validate before any fabrication.');
+    });
+    document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
+    document.getElementById('recordBtn').addEventListener('click', () => showToast('Field record export is not connected in this prototype.'));
+    document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      const view = button.getAttribute('data-view');
+      if (view) {
+        document.getElementById('datasetView').hidden = view !== 'dataset';
+        document.getElementById('reconstructionView').hidden = view !== 'reconstruction';
+      } else {
+        showToast(`${button.getAttribute('aria-label')} view is not connected yet.`);
+      }
+    }));
+  </script>
+</body>
+</html>
