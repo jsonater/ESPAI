@@ -8,3 +8,4 @@ python-multipart>=0.0.20,<1
 shapely>=2.0,<3
 trimesh>=4.5,<5
 uvicorn>=0.30,<1
+websockets>=15,<16

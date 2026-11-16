@@ -8,11 +8,11 @@ The trainer consumes a JSON bundle exported by the **Training image library** in
 
 - Collect rights-cleared, real facade photos and verify labels before saving them.
 - Use JPEG or PNG images. Convert phone HEIC photos to JPEG first.
-- Collect at least 10 images for each of at least two condition labels to run the baseline. This is only a minimum for exercising the pipeline; credible generalization requires substantially more diverse images.
+- Collect at least 10 images for each of at least two condition labels, with each condition represented at three or more identified sites. This is only a minimum for exercising the pipeline; credible generalization requires substantially more diverse images.
 - Include varied sites, viewpoints, lighting, distances, and intact reference examples. Avoid putting near-duplicate photos in the collection.
 - In the website, choose images, set their condition and site, add them to the dataset, then select **Export data**. Keep the JSON bundle private; it contains the original images.
 
-The current split is stratified by label but random by image. It can put images from the same site in both training and test sets, so reported test accuracy may overstate performance on unseen sites. A site-held-out evaluation should be added before treating metrics as research results.
+The trainer keeps each identified site entirely within one split, so images from one site cannot appear in both training and test sets. The split requires at least three identified sites per condition and may produce uneven split sizes when a site has many images. Metrics remain exploratory; test results may not generalize to unseen cameras, materials, or regions.
 
 ## Train
 

@@ -2,31 +2,48 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import json
 import os
 import threading
 import time
+import requests
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import URLError
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import cv2
 import numpy as np
+import websockets
 from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from backend.camera_stream import DEFAULT_STREAM_URL, decode_jpeg_frame, iter_camera_frames
+from backend.camera_stream import CameraStreamError, decode_jpeg_frame
 from backend.mesh_export import create_stepped_cornice
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 IMAGE_TYPES = {"image/jpeg", "image/png"}
-CAMERA_STREAM_URL = os.environ.get("ESP32_STREAM_URL", DEFAULT_STREAM_URL)
+CAMERA_WEBSOCKET_URL = os.environ.get("ESP32_WEBSOCKET_URL", "ws://192.168.4.1/Camera")
+CAMERA_CAPTURE_URL = os.environ.get("ESP32_CAPTURE_URL", "http://192.168.4.1/capture")
 ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY")
 ROBOFLOW_MODEL_ID = os.environ.get("ROBOFLOW_MODEL_ID")
 ROBOFLOW_API_URL = os.environ.get("ROBOFLOW_API_URL", "https://serverless.roboflow.com")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3-vl:2b")
+OLLAMA_TIMEOUT_SECONDS = 180
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CAPTURE_PHOTO_DIR = Path.home() / "Desktop" / "ESP car photos"
 CAMERA_STATUS_LOCK = threading.Lock()
 CAMERA_FRAME_TIMES: list[float] = []
+CAMERA_LATEST_JPEG: bytes | None = None
+CAMERA_FRAME_NUMBER = 0
 CAMERA_STATUS = {
     "state": "idle",
     "width": None,
@@ -36,8 +53,105 @@ CAMERA_STATUS = {
     "last_frame_at": None,
     "error": None,
 }
+OLLAMA_CONDITIONS = (
+    "Missing section",
+    "Fracture",
+    "Surface erosion",
+    "Intact reference",
+    "Uncertain",
+)
 
-app = FastAPI(title="Robo Rebels Heritage API", version="0.1.0")
+
+class OllamaUnavailableError(Exception):
+    """Raised when the local Ollama service cannot be reached."""
+
+
+class OllamaInferenceError(Exception):
+    """Raised when Ollama cannot produce a valid structured result."""
+
+
+class OllamaTimeoutError(Exception):
+    """Raised when local vision inference exceeds the configured request timeout."""
+
+
+async def receive_from_esp32() -> None:
+    """Keep one WebSocket connection open and cache incoming binary JPEG frames."""
+    global CAMERA_FRAME_NUMBER, CAMERA_LATEST_JPEG
+    reconnect_delay = 1
+    while True:
+        with CAMERA_STATUS_LOCK:
+            state = "reconnecting" if CAMERA_STATUS["error"] else "connecting"
+            CAMERA_STATUS.update(state=state)
+        try:
+            async with websockets.connect(
+                CAMERA_WEBSOCKET_URL,
+                open_timeout=5,
+                close_timeout=3,
+                ping_interval=20,
+                max_size=MAX_UPLOAD_BYTES,
+                compression=None,
+                proxy=None,
+            ) as websocket:
+                reconnect_delay = 1
+                async for message in websocket:
+                    if isinstance(message, str):
+                        raise CameraStreamError("Expected binary JPEG WebSocket frames, received text")
+
+                    jpeg = bytes(message)
+                    frame = decode_jpeg_frame(jpeg)
+                    height, width = frame.shape[:2]
+                    now = time.time()
+                    with CAMERA_STATUS_LOCK:
+                        CAMERA_FRAME_TIMES.append(now)
+                        while CAMERA_FRAME_TIMES and now - CAMERA_FRAME_TIMES[0] > 5:
+                            CAMERA_FRAME_TIMES.pop(0)
+                        CAMERA_FRAME_NUMBER += 1
+                        elapsed = CAMERA_FRAME_TIMES[-1] - CAMERA_FRAME_TIMES[0] if len(CAMERA_FRAME_TIMES) > 1 else 0
+                        CAMERA_LATEST_JPEG = jpeg
+                        CAMERA_STATUS.update(
+                            state="streaming",
+                            width=width,
+                            height=height,
+                            fps=round((len(CAMERA_FRAME_TIMES) - 1) / elapsed, 1) if elapsed > 0 else 0.0,
+                            frames_received=CAMERA_FRAME_NUMBER,
+                            last_frame_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                            error=None,
+                        )
+                raise CameraStreamError("Camera WebSocket closed")
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError as error:
+            detail = str(error) or "WebSocket connection timed out"
+            detail += ". Verify laptop Wi-Fi is MyWiFiCar, the car is powered on, and /Camera is the firmware WebSocket path"
+            with CAMERA_STATUS_LOCK:
+                CAMERA_STATUS.update(state="reconnecting", error=detail)
+        except websockets.exceptions.InvalidStatus as error:
+            response = error.response
+            server = response.headers.get("Server")
+            detail = f"WebSocket handshake rejected with HTTP {response.status_code}"
+            if server:
+                detail += f" by {server}"
+            with CAMERA_STATUS_LOCK:
+                CAMERA_STATUS.update(state="reconnecting", error=detail)
+        except Exception as error:
+            with CAMERA_STATUS_LOCK:
+                CAMERA_STATUS.update(state="reconnecting", error=str(error))
+        await asyncio.sleep(reconnect_delay)
+        reconnect_delay = min(reconnect_delay * 2, 8)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    receiver_task = asyncio.create_task(receive_from_esp32(), name="esp32-websocket-receiver")
+    try:
+        yield
+    finally:
+        receiver_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await receiver_task
+
+
+app = FastAPI(title="Robo Rebels Heritage API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["null", "http://localhost:8000", "http://127.0.0.1:8000"],
@@ -53,45 +167,108 @@ def dashboard() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "geometry": "dimensioned concept mesh; no AI inference"}
+    return {"status": "ok", "geometry": "dimensioned concept mesh; image analysis does not reconstruct geometry"}
 
 
 @app.get("/api/v1/camera/status")
 def camera_status() -> dict[str, str | int | float | None]:
     with CAMERA_STATUS_LOCK:
-        return {**CAMERA_STATUS, "source": CAMERA_STREAM_URL}
+        return {**CAMERA_STATUS, "source": CAMERA_WEBSOCKET_URL, "capture_source": CAMERA_CAPTURE_URL}
+
+
+def save_capture_photo(jpeg: bytes) -> Path:
+    """Save one captured JPEG into the user's dedicated desktop photo folder."""
+    CAPTURE_PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    path = CAPTURE_PHOTO_DIR / f"car-{timestamp}.jpg"
+    path.write_bytes(jpeg)
+    return path
+
+
+@app.get("/api/v1/camera/frame")
+def latest_camera_frame() -> Response:
+    """Return the latest cached JPEG for browser clients that cannot render MJPEG."""
+    with CAMERA_STATUS_LOCK:
+        jpeg = CAMERA_LATEST_JPEG
+        frame_number = CAMERA_FRAME_NUMBER
+    if jpeg is None:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Frame-Number": str(frame_number),
+        },
+    )
+
+
+@app.get("/api/v1/camera/capture")
+def capture_camera_image() -> Response:
+    """Return the latest WebSocket frame, or fetch one HTTP still as a fallback."""
+    with CAMERA_STATUS_LOCK:
+        latest_jpeg = CAMERA_LATEST_JPEG if CAMERA_STATUS["state"] == "streaming" else None
+        latest_width = CAMERA_STATUS["width"]
+        latest_height = CAMERA_STATUS["height"]
+    if latest_jpeg is not None:
+        try:
+            saved_path = save_capture_photo(latest_jpeg)
+        except OSError as error:
+            raise HTTPException(status_code=500, detail=f"Could not save photo to Desktop/ESP car photos: {error}") from error
+        return Response(
+            content=latest_jpeg,
+            media_type="image/jpeg",
+            headers={
+                "X-Image-Resolution": f"{latest_width}x{latest_height}",
+                "X-Saved-Photo": saved_path.name,
+            },
+        )
+
+    try:
+        with urlopen(CAMERA_CAPTURE_URL, timeout=5) as response:
+            image_bytes = response.read(MAX_UPLOAD_BYTES + 1)
+    except (URLError, TimeoutError, OSError) as error:
+        raise HTTPException(status_code=502, detail=f"Could not receive a camera still: {error}") from error
+
+    if not image_bytes:
+        raise HTTPException(status_code=502, detail="Camera capture endpoint returned an empty image")
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Camera still exceeds the 10 MiB limit")
+
+    frame = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=502, detail="Camera capture endpoint did not return a valid image")
+    success, encoded = cv2.imencode(".jpg", frame)
+    if not success:
+        raise HTTPException(status_code=500, detail="Could not encode the captured camera image")
+    height, width = frame.shape[:2]
+    jpeg = encoded.tobytes()
+    try:
+        saved_path = save_capture_photo(jpeg)
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"Could not save photo to Desktop/ESP car photos: {error}") from error
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={
+            "X-Image-Resolution": f"{width}x{height}",
+            "X-Saved-Photo": saved_path.name,
+        },
+    )
 
 
 @app.get("/api/v1/camera/stream")
 def camera_stream() -> StreamingResponse:
-    """Proxy the configured ESP32 MJPEG stream to a browser as multipart JPEG."""
-    with CAMERA_STATUS_LOCK:
-        CAMERA_STATUS.update(state="connecting", error=None)
+    """Fan out cached WebSocket JPEG frames to browser clients as MJPEG."""
 
-    def frames():
-        try:
-            for frame in iter_camera_frames(CAMERA_STREAM_URL):
-                success, encoded = cv2.imencode(".jpg", frame)
-                if not success:
-                    continue
-                frame_height, frame_width = frame.shape[:2]
-                now = time.time()
-                with CAMERA_STATUS_LOCK:
-                    CAMERA_FRAME_TIMES.append(now)
-                    while CAMERA_FRAME_TIMES and now - CAMERA_FRAME_TIMES[0] > 5:
-                        CAMERA_FRAME_TIMES.pop(0)
-                    frame_count = CAMERA_STATUS["frames_received"] + 1
-                    elapsed = CAMERA_FRAME_TIMES[-1] - CAMERA_FRAME_TIMES[0] if len(CAMERA_FRAME_TIMES) > 1 else 0
-                    CAMERA_STATUS.update(
-                        state="streaming",
-                        width=frame_width,
-                        height=frame_height,
-                        fps=round((len(CAMERA_FRAME_TIMES) - 1) / elapsed, 1) if elapsed > 0 else 0.0,
-                        frames_received=frame_count,
-                        last_frame_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-                        error=None,
-                    )
-                jpeg = encoded.tobytes()
+    async def frames():
+        last_frame_number = 0
+        while True:
+            with CAMERA_STATUS_LOCK:
+                jpeg = CAMERA_LATEST_JPEG
+                frame_number = CAMERA_FRAME_NUMBER
+            if jpeg is not None and frame_number != last_frame_number:
+                last_frame_number = frame_number
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n"
@@ -99,12 +276,7 @@ def camera_stream() -> StreamingResponse:
                     + jpeg
                     + b"\r\n"
                 )
-        except Exception as error:
-            with CAMERA_STATUS_LOCK:
-                CAMERA_STATUS.update(state="error", error=str(error))
-        else:
-            with CAMERA_STATUS_LOCK:
-                CAMERA_STATUS.update(state="stopped")
+            await asyncio.sleep(0.02)
 
     return StreamingResponse(
         frames(),
@@ -120,7 +292,120 @@ def roboflow_status() -> dict[str, str | bool | None]:
         "configured": configured,
         "model_id": ROBOFLOW_MODEL_ID if configured else None,
         "runtime": "serverless-cloud" if configured else None,
+        "internet_required": True,
     }
+
+
+@app.get("/api/v1/ollama/status")
+def ollama_status() -> dict[str, str | bool | None]:
+    request = Request(f"{OLLAMA_BASE_URL}/api/tags", headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read(1024 * 1024 + 1))
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return {
+            "available": False,
+            "model_installed": False,
+            "model": OLLAMA_MODEL,
+            "runtime": "local",
+            "message": "Start Ollama to enable local image analysis.",
+        }
+
+    models = payload.get("models", []) if isinstance(payload, dict) else []
+    if not isinstance(models, list):
+        models = []
+    installed = any(
+        isinstance(model, dict)
+        and OLLAMA_MODEL in {model.get("name"), model.get("model")}
+        for model in models
+    )
+    return {
+        "available": True,
+        "model_installed": installed,
+        "model": OLLAMA_MODEL,
+        "runtime": "local",
+        "message": "Ready" if installed else f"Install the model with: ollama pull {OLLAMA_MODEL}",
+    }
+
+
+def run_ollama_inference(image_bytes: bytes) -> dict:
+    request_body = json.dumps({
+        "model": OLLAMA_MODEL,
+        "prompt": "In one short sentence, describe only what is visibly damaged in this image. If no damage is clear, say uncertain.",
+        "images": [base64.b64encode(image_bytes).decode("ascii")],
+        "stream": False,
+        "think": False,
+        "keep_alive": "5m",
+        "options": {"temperature": 0, "num_predict": 1024},
+    }).encode("utf-8")
+    request = Request(
+        f"{OLLAMA_BASE_URL}/api/generate",
+        data=request_body,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
+            response_body = response.read(1024 * 1024 + 1)
+    except TimeoutError as error:
+        raise OllamaTimeoutError(
+            f"Local vision analysis exceeded {OLLAMA_TIMEOUT_SECONDS} seconds; try a smaller image or a faster model"
+        ) from error
+    except HTTPError as error:
+        detail = error.read(1024).decode("utf-8", errors="replace")
+        raise OllamaInferenceError(f"Ollama returned HTTP {error.code}: {detail}") from error
+    except (URLError, OSError) as error:
+        raise OllamaUnavailableError("Could not reach local Ollama at 127.0.0.1:11434") from error
+
+    if len(response_body) > 1024 * 1024:
+        raise OllamaInferenceError("Ollama response exceeded the 1 MiB limit")
+    try:
+        payload = json.loads(response_body)
+        observation = payload.get("response", "").strip()
+        done_reason = payload.get("done_reason")
+    except (json.JSONDecodeError, TypeError) as error:
+        raise OllamaInferenceError("Ollama returned an invalid response") from error
+    if not observation:
+        detail = "Ollama returned no visible-damage description"
+        if done_reason == "length":
+            detail += " before reaching its output limit"
+        raise OllamaInferenceError(detail)
+
+    condition = next(
+        (label for label in OLLAMA_CONDITIONS if observation.casefold().startswith(label.casefold())),
+        "Uncertain",
+    )
+    analysis = {
+        "condition": condition,
+        "observations": observation,
+        "visible_damage_location": "Not reliably determined by this image-level check.",
+        "limitations": "Visual observations only; no physical scale, hidden geometry, reconstruction, or repaired STL.",
+    }
+    return {"provider": "ollama", "model": OLLAMA_MODEL, "analysis": analysis}
+
+
+@app.post("/api/v1/ollama/predict")
+async def predict_with_ollama(image: UploadFile = File(...)) -> dict:
+    if not image.content_type or image.content_type.split(";")[0].strip().lower() not in IMAGE_TYPES:
+        raise HTTPException(status_code=415, detail="Upload a JPEG or PNG image")
+
+    image_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
+    await image.close()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty")
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the 10 MiB upload limit")
+    if cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR) is None:
+        raise HTTPException(status_code=400, detail="Uploaded bytes are not a valid JPEG or PNG image")
+
+    try:
+        return await run_in_threadpool(run_ollama_inference, image_bytes)
+    except OllamaTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except OllamaUnavailableError as error:
+        raise HTTPException(status_code=503, detail=f"{error}. Start Ollama and pull {OLLAMA_MODEL}.") from error
+    except OllamaInferenceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 def run_roboflow_inference(image_rgb: np.ndarray) -> dict:

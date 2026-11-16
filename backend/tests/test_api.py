@@ -1,5 +1,10 @@
+import base64
+import asyncio
 import io
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import cv2
@@ -8,6 +13,33 @@ import trimesh
 from fastapi.testclient import TestClient
 
 import backend.main as api
+
+
+class FakeCameraWebSocket:
+    def __init__(self, jpeg, event, *, fail=False):
+        self.jpeg = jpeg
+        self.event = event
+        self.fail = fail
+        self.sent_frame = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.fail:
+            self.event.set()
+            raise OSError("camera offline")
+        if self.sent_frame:
+            await asyncio.Future()
+        self.sent_frame = True
+        self.event.set()
+        return self.jpeg
 
 
 class ConceptMeshApiTests(unittest.TestCase):
@@ -31,6 +63,8 @@ class ConceptMeshApiTests(unittest.TestCase):
                 error=None,
             )
             api.CAMERA_FRAME_TIMES.clear()
+            api.CAMERA_LATEST_JPEG = None
+            api.CAMERA_FRAME_NUMBER = 0
 
     def test_health_route(self):
         response = self.client.get("/api/health")
@@ -44,6 +78,68 @@ class ConceptMeshApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Training image library", response.text)
 
+    def test_camera_capture_returns_a_valid_local_jpeg(self):
+        response_mock = unittest.mock.MagicMock()
+        response_mock.__enter__.return_value = response_mock
+        response_mock.read.return_value = self.jpeg
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(api, "CAMERA_CAPTURE_URL", "http://192.168.4.1/capture"),
+                patch.object(api, "CAPTURE_PHOTO_DIR", Path(temp_dir) / "ESP car photos"),
+                patch("backend.main.urlopen", return_value=response_mock) as camera_request,
+            ):
+                response = self.client.get("/api/v1/camera/capture")
+
+            output_dir = Path(temp_dir) / "ESP car photos"
+            saved_photos = list(output_dir.iterdir())
+            self.assertEqual(len(saved_photos), 1)
+            self.assertEqual(saved_photos[0].suffix, ".jpg")
+            self.assertEqual(saved_photos[0].read_bytes(), self.jpeg)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        self.assertEqual(response.headers["x-image-resolution"], "32x24")
+        self.assertTrue(response.content.startswith(b"\xff\xd8"))
+        self.assertTrue(response.headers["x-saved-photo"].endswith(".jpg"))
+        camera_request.assert_called_once_with("http://192.168.4.1/capture", timeout=5)
+
+    def test_camera_capture_returns_latest_websocket_frame_when_streaming(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "ESP car photos"
+            with (
+                patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+                patch.object(api, "CAMERA_STATUS", {**api.CAMERA_STATUS, "state": "streaming", "width": 32, "height": 24}),
+                patch.object(api, "CAPTURE_PHOTO_DIR", output_dir),
+                patch("backend.main.urlopen") as camera_request,
+            ):
+                response = self.client.get("/api/v1/camera/capture")
+
+            saved_photos = list(output_dir.iterdir())
+            self.assertEqual(len(saved_photos), 1)
+            self.assertEqual(saved_photos[0].suffix, ".jpg")
+            self.assertEqual(saved_photos[0].read_bytes(), self.jpeg)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        self.assertEqual(response.headers["x-image-resolution"], "32x24")
+        self.assertTrue(response.headers["x-saved-photo"].endswith(".jpg"))
+        self.assertEqual(response.content, self.jpeg)
+        camera_request.assert_not_called()
+
+    def test_latest_frame_route_returns_cached_jpeg_and_frame_number(self):
+        with patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg), patch.object(api, "CAMERA_FRAME_NUMBER", 42):
+            response = self.client.get("/api/v1/camera/frame")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        self.assertEqual(response.headers["x-frame-number"], "42")
+        self.assertEqual(response.content, self.jpeg)
+
+    def test_latest_frame_route_returns_no_content_before_first_frame(self):
+        response = self.client.get("/api/v1/camera/frame")
+
+        self.assertEqual(response.status_code, 204)
+
     def test_roboflow_status_does_not_expose_api_key(self):
         with patch.object(api, "ROBOFLOW_API_KEY", "private-test-key"), patch.object(api, "ROBOFLOW_MODEL_ID", "heritage-project/1"):
             response = self.client.get("/api/v1/roboflow/status")
@@ -53,8 +149,106 @@ class ConceptMeshApiTests(unittest.TestCase):
             "configured": True,
             "model_id": "heritage-project/1",
             "runtime": "serverless-cloud",
+            "internet_required": True,
         })
         self.assertNotIn("private-test-key", response.text)
+
+    def test_ollama_status_reports_installed_local_model(self):
+        response_mock = unittest.mock.MagicMock()
+        response_mock.__enter__.return_value = response_mock
+        response_mock.read.return_value = json.dumps({"models": [{"name": "qwen3-vl:2b"}]}).encode()
+        with patch("backend.main.urlopen", return_value=response_mock) as ollama_request:
+            response = self.client.get("/api/v1/ollama/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "available": True,
+            "model_installed": True,
+            "model": "qwen3-vl:2b",
+            "runtime": "local",
+            "message": "Ready",
+        })
+        self.assertIn("127.0.0.1:11434/api/tags", ollama_request.call_args.args[0].full_url)
+
+    def test_ollama_status_reports_when_service_is_not_running(self):
+        with patch("backend.main.urlopen", side_effect=OSError("connection refused")):
+            response = self.client.get("/api/v1/ollama/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["available"])
+        self.assertFalse(response.json()["model_installed"])
+
+    def test_ollama_inference_sends_local_image_and_parses_text_result(self):
+        observation = "Fracture: a visible crack crosses the stone surface."
+        response_mock = unittest.mock.MagicMock()
+        response_mock.__enter__.return_value = response_mock
+        response_mock.read.return_value = json.dumps({"response": observation, "done_reason": "stop"}).encode()
+        with patch("backend.main.urlopen", return_value=response_mock) as ollama_request:
+            result = api.run_ollama_inference(self.jpeg)
+
+        request = ollama_request.call_args.args[0]
+        request_payload = json.loads(request.data)
+        self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/generate")
+        self.assertEqual(request_payload["model"], "qwen3-vl:2b")
+        self.assertEqual(request_payload["images"], [base64.b64encode(self.jpeg).decode("ascii")])
+        self.assertFalse(request_payload["stream"])
+        self.assertFalse(request_payload["think"])
+        self.assertNotIn("format", request_payload)
+        self.assertEqual(request_payload["options"]["num_predict"], 1024)
+        self.assertEqual(result["analysis"]["condition"], "Fracture")
+        self.assertEqual(result["analysis"]["observations"], observation)
+        self.assertIn("no physical scale", result["analysis"]["limitations"])
+        self.assertEqual(result["provider"], "ollama")
+
+    def test_ollama_inference_rejects_empty_truncated_output(self):
+        response_mock = unittest.mock.MagicMock()
+        response_mock.__enter__.return_value = response_mock
+        response_mock.read.return_value = json.dumps({"response": "", "done_reason": "length"}).encode()
+        with patch("backend.main.urlopen", return_value=response_mock):
+            with self.assertRaisesRegex(api.OllamaInferenceError, "output limit"):
+                api.run_ollama_inference(self.jpeg)
+
+    def test_ollama_inference_does_not_treat_negated_damage_as_a_label(self):
+        response_mock = unittest.mock.MagicMock()
+        response_mock.__enter__.return_value = response_mock
+        response_mock.read.return_value = json.dumps({
+            "response": "No visible fracture is confirmed; uncertain.",
+            "done_reason": "stop",
+        }).encode()
+        with patch("backend.main.urlopen", return_value=response_mock):
+            result = api.run_ollama_inference(self.jpeg)
+
+        self.assertEqual(result["analysis"]["condition"], "Uncertain")
+
+    def test_ollama_prediction_rejects_invalid_images_without_calling_model(self):
+        with patch("backend.main.run_ollama_inference") as inference:
+            response = self.client.post(
+                "/api/v1/ollama/predict",
+                files={"image": ("frame.jpg", b"not an image", "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        inference.assert_not_called()
+
+    def test_ollama_prediction_reports_unavailable_service(self):
+        with patch("backend.main.run_ollama_inference", side_effect=api.OllamaUnavailableError("Ollama is offline")):
+            response = self.client.post(
+                "/api/v1/ollama/predict",
+                files={"image": ("frame.jpg", self.jpeg, "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("pull qwen3-vl:2b", response.json()["detail"].lower())
+
+    def test_ollama_prediction_reports_slow_inference_as_timeout(self):
+        with patch("backend.main.run_ollama_inference", side_effect=api.OllamaTimeoutError("Local model is slow")):
+            response = self.client.post(
+                "/api/v1/ollama/predict",
+                files={"image": ("frame.jpg", self.jpeg, "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(response.json()["detail"], "Local model is slow")
 
     def test_roboflow_prediction_requires_configuration(self):
         with patch.object(api, "ROBOFLOW_API_KEY", None), patch.object(api, "ROBOFLOW_MODEL_ID", None):
@@ -105,28 +299,76 @@ class ConceptMeshApiTests(unittest.TestCase):
         )
         self.assertEqual(result, expected)
 
-    def test_camera_stream_returns_mjpeg_and_updates_status(self):
-        frame = np.zeros((24, 32, 3), dtype=np.uint8)
-        with patch("backend.main.iter_camera_frames", return_value=iter([frame])):
-            response = self.client.get("/api/v1/camera/stream")
+    def test_startup_receiver_caches_binary_jpeg_from_camera_websocket(self):
+        frame_received = asyncio.Event()
+        websocket = FakeCameraWebSocket(self.jpeg, frame_received)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.headers["content-type"].startswith("multipart/x-mixed-replace"))
-        self.assertIn(b"--frame\r\n", response.content)
-        self.assertIn(b"Content-Type: image/jpeg", response.content)
+        async def run_receiver_once():
+            with (
+                patch.object(api, "CAMERA_WEBSOCKET_URL", "ws://192.168.4.1/Camera"),
+                patch("backend.main.websockets.connect", return_value=websocket),
+            ):
+                async with api.lifespan(api.app):
+                    await asyncio.wait_for(frame_received.wait(), timeout=1)
+
+        asyncio.run(run_receiver_once())
+
         status = self.client.get("/api/v1/camera/status").json()
-        self.assertEqual(status["state"], "stopped")
+        self.assertEqual(status["state"], "streaming")
+        self.assertEqual(status["source"], "ws://192.168.4.1/Camera")
         self.assertEqual((status["width"], status["height"]), (32, 24))
         self.assertEqual(status["frames_received"], 1)
+        self.assertEqual(api.CAMERA_LATEST_JPEG, self.jpeg)
 
-    def test_camera_stream_reports_connection_failure(self):
-        with patch("backend.main.iter_camera_frames", side_effect=RuntimeError("camera offline")):
-            response = self.client.get("/api/v1/camera/stream")
+    def test_receiver_reports_websocket_connection_failure(self):
+        failed = asyncio.Event()
+        websocket = FakeCameraWebSocket(self.jpeg, failed, fail=True)
 
-        self.assertEqual(response.status_code, 200)
-        status = self.client.get("/api/v1/camera/status").json()
-        self.assertEqual(status["state"], "error")
-        self.assertEqual(status["error"], "camera offline")
+        async def run_receiver_once():
+            with patch("backend.main.websockets.connect", return_value=websocket):
+                task = asyncio.create_task(api.receive_from_esp32())
+                await asyncio.wait_for(failed.wait(), timeout=1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run_receiver_once())
+        self.assertEqual(api.CAMERA_STATUS["state"], "reconnecting")
+        self.assertEqual(api.CAMERA_STATUS["error"], "camera offline")
+
+    def test_receiver_timeout_explains_network_and_path_checks(self):
+        async def run_receiver_once():
+            with patch("backend.main.websockets.connect", side_effect=TimeoutError("opening handshake timed out")):
+                task = asyncio.create_task(api.receive_from_esp32())
+                for _ in range(10):
+                    await asyncio.sleep(0)
+                    if api.CAMERA_STATUS["state"] == "reconnecting":
+                        break
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run_receiver_once())
+        self.assertIn("Wi-Fi is MyWiFiCar", api.CAMERA_STATUS["error"])
+        self.assertIn("/Camera", api.CAMERA_STATUS["error"])
+
+    def test_camera_stream_mjpeg_fans_out_cached_websocket_frame(self):
+        async def read_one_chunk():
+            response = api.camera_stream()
+            iterator = response.body_iterator
+            try:
+                return await asyncio.wait_for(anext(iterator), timeout=1)
+            finally:
+                await iterator.aclose()
+
+        with patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg), patch.object(api, "CAMERA_FRAME_NUMBER", 1):
+            response = api.camera_stream()
+            body = asyncio.run(read_one_chunk())
+
+        self.assertTrue(response.media_type.startswith("multipart/x-mixed-replace"))
+        self.assertIn(b"--frame\r\n", body)
+        self.assertIn(b"Content-Type: image/jpeg", body)
+        self.assertIn(self.jpeg, body)
 
     def test_valid_camera_frame_returns_stl(self):
         response = self.client.post(

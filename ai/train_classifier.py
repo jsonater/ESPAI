@@ -34,9 +34,10 @@ class Sample:
 
 def decode_data_url(data_url: str, file_name: str) -> bytes:
     header, separator, payload = data_url.partition(",")
-    if not separator or not header.startswith("data:image/") or ";base64" not in header:
+    mime_type, metadata_separator, encoding = header.partition(";")
+    if not separator or not metadata_separator or encoding != "base64":
         raise ValueError(f"{file_name}: image is not a base64-encoded image data URL")
-    if not (header.startswith("data:image/jpeg") or header.startswith("data:image/png")):
+    if mime_type not in {"data:image/jpeg", "data:image/png"}:
         raise ValueError(f"{file_name}: use a JPEG or PNG image (phone HEIC files must be converted first)")
     try:
         image_bytes = base64.b64decode(payload, validate=True)
@@ -52,6 +53,8 @@ def load_samples(path: Path) -> list[Sample]:
         bundle = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Could not read dataset JSON: {error}") from error
+    if not isinstance(bundle, dict):
+        raise ValueError("Dataset bundle must be a JSON object")
     if bundle.get("format") != "vestige-dataset-v1":
         raise ValueError("Unsupported dataset format; export data from the Vestige dataset page")
     records = bundle.get("samples")
@@ -103,17 +106,66 @@ def validate_class_counts(samples: list[Sample], minimum: int) -> list[str]:
 
 def stratified_indices(samples: list[Sample], classes: list[str], seed: int) -> tuple[list[int], list[int], list[int]]:
     rng = random.Random(seed)
-    train: list[int] = []
-    validation: list[int] = []
-    test: list[int] = []
-    for condition in classes:
-        indices = [index for index, sample in enumerate(samples) if sample.condition == condition]
-        rng.shuffle(indices)
-        test_count = max(1, round(len(indices) * 0.15))
-        validation_count = max(1, round(len(indices) * 0.15))
-        test.extend(indices[:test_count])
-        validation.extend(indices[test_count:test_count + validation_count])
-        train.extend(indices[test_count + validation_count:])
+    groups: dict[str, list[int]] = {}
+    group_classes: dict[str, set[str]] = {}
+    sites_per_class = {condition: set() for condition in classes}
+    for index, sample in enumerate(samples):
+        site_name = sample.site.strip()
+        if not site_name or site_name.casefold() in {"unknown", "unknown / unverified"}:
+            raise ValueError(f"{sample.file_name}: an identified site is required for site-held-out evaluation")
+        site = site_name.casefold()
+        groups.setdefault(site, []).append(index)
+        group_classes.setdefault(site, set()).add(sample.condition)
+        sites_per_class[sample.condition].add(site)
+
+    insufficient = {
+        condition: len(sites)
+        for condition, sites in sites_per_class.items()
+        if len(sites) < 3
+    }
+    if insufficient:
+        details = ", ".join(f"{condition}: {count}/3 sites" for condition, count in insufficient.items())
+        raise ValueError(f"Site-held-out evaluation needs at least 3 identified sites per condition; currently: {details}")
+
+    remaining_sites = set(groups)
+
+    def select_site_split(*, reserve_sites: int, fraction: float) -> list[str]:
+        selected: list[str] = []
+        selected_classes: set[str] = set()
+        selected_count = 0
+        target_count = round(len(samples) * fraction)
+
+        while len(selected_classes) < len(classes) or selected_count < target_count:
+            candidates = []
+            for site in sorted(remaining_sites):
+                labels = group_classes[site]
+                if all(len(sites_per_class[label]) - 1 >= reserve_sites for label in labels):
+                    candidates.append(site)
+            if not candidates:
+                if len(selected_classes) < len(classes):
+                    raise ValueError("Could not create site-held-out splits containing every condition")
+                break
+
+            rng.shuffle(candidates)
+            if len(selected_classes) < len(classes):
+                candidates.sort(key=lambda site: -len(group_classes[site] - selected_classes))
+            else:
+                candidates.sort(key=lambda site: abs(target_count - selected_count - len(groups[site])))
+
+            site = candidates[0]
+            selected.append(site)
+            remaining_sites.remove(site)
+            selected_classes.update(group_classes[site])
+            selected_count += len(groups[site])
+            for label in group_classes[site]:
+                sites_per_class[label].remove(site)
+        return selected
+
+    test_sites = select_site_split(reserve_sites=2, fraction=0.15)
+    validation_sites = select_site_split(reserve_sites=1, fraction=0.15)
+    test = [index for site in test_sites for index in groups[site]]
+    validation = [index for site in validation_sites for index in groups[site]]
+    train = [index for site in sorted(remaining_sites) for index in groups[site]]
     rng.shuffle(train)
     rng.shuffle(validation)
     rng.shuffle(test)
@@ -236,7 +288,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "test_loss": float(test_loss),
         "test_accuracy": float(test_accuracy),
         "best_validation_accuracy": max(history.history.get("val_accuracy", [0.0])),
-        "split_warning": "Images are split randomly, not by site; results may overestimate performance on new sites.",
+        "split_warning": "Splits are held out by site; results may still not generalize to unseen cameras, materials, or regions.",
         "model_bytes": len(tflite_model),
     }
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")

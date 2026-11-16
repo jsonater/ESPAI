@@ -51,6 +51,22 @@ class DatasetBundleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JPEG or PNG"):
             load_samples(self.bundle_path)
 
+    def test_rejects_malformed_dataset_roots_and_mime_types(self):
+        self.write_bundle([])
+        with self.assertRaisesRegex(ValueError, "JSON object"):
+            load_samples(self.bundle_path)
+
+        self.write_bundle({
+            "format": "vestige-dataset-v1",
+            "samples": [{
+                "fileName": "capture.jpg",
+                "condition": "Fracture",
+                "imageDataUrl": "data:image/jpegx;base64,aGVsbG8=",
+            }],
+        })
+        with self.assertRaisesRegex(ValueError, "JPEG or PNG"):
+            load_samples(self.bundle_path)
+
     def test_requires_multiple_classes_and_minimum_examples(self):
         one_class = [Sample(b"x", "Fracture", "Site A", str(index)) for index in range(12)]
         with self.assertRaisesRegex(ValueError, "At least two"):
@@ -66,17 +82,35 @@ class DatasetBundleTests(unittest.TestCase):
 
     def test_split_keeps_every_sample_and_each_class_in_all_splits(self):
         samples = [
-            Sample(b"x", condition, "Site A", f"{condition}-{index}")
+            Sample(b"x", condition, f"Site {site}", f"{condition}-{site}-{index}")
             for condition in CONDITIONS[:2]
-            for index in range(20)
+            for site in range(6)
+            for index in range(4)
         ]
 
         splits = stratified_indices(samples, list(CONDITIONS[:2]), seed=7)
 
         flattened = [index for split in splits for index in split]
         self.assertEqual(sorted(flattened), list(range(len(samples))))
+        split_sites = [
+            {samples[index].site for index in split}
+            for split in splits
+        ]
+        self.assertFalse(split_sites[0] & split_sites[1])
+        self.assertFalse(split_sites[0] & split_sites[2])
+        self.assertFalse(split_sites[1] & split_sites[2])
         for split in splits:
             self.assertEqual(Counter(samples[index].condition for index in split).keys(), set(CONDITIONS[:2]))
+
+    def test_split_requires_three_identified_sites_per_condition(self):
+        samples = [
+            Sample(b"x", condition, f"Site {site}", f"{condition}-{site}")
+            for condition in CONDITIONS[:2]
+            for site in range(2)
+        ]
+
+        with self.assertRaisesRegex(ValueError, "at least 3 identified sites"):
+            stratified_indices(samples, list(CONDITIONS[:2]), seed=7)
 
 
 if __name__ == "__main__":

@@ -172,9 +172,11 @@
     .live-placeholder { aspect-ratio: 16 / 9; display: grid; place-content: center; gap: 7px; padding: 18px; text-align: center; background: #202923; color: #e6ece5; }
     .live-placeholder strong { font: 20px var(--serif); }
     .live-placeholder span { color: #bbc6bc; font-size: 10px; }
-    .live-controls { padding: 11px 13px; display: flex; align-items: center; gap: 7px; border-top: 1px solid #e7eae5; }
+    .live-controls { padding: 11px 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; border-top: 1px solid #e7eae5; }
     .live-controls .dataset-button { min-width: 90px; }
     .live-controls small { margin-left: auto; color: var(--muted); font-size: 9px; }
+    .inference-provider { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
+    .inference-provider select { width: auto; min-width: 132px; padding: 7px; }
     .live-readouts { display: grid; gap: 8px; }
     .live-stat { padding: 12px; }
     .live-stat small { display: block; color: var(--muted); font-size: 9px; }
@@ -245,7 +247,7 @@
             <div class="dataset-main">
               <div class="panel dataset-toolbar">
                 <div><strong id="selectionLabel">No images selected</strong><p>Use photos from your phone or camera. The NodeMCU board has no camera built in.</p></div>
-                <div class="dataset-actions"><label class="dataset-button" for="datasetFiles">＋ Choose images</label><button class="dataset-button primary" id="saveSamples" type="button" disabled>Add to dataset</button><button class="dataset-button" id="exportDataset" type="button" disabled>↓ Export data</button><input id="datasetFiles" type="file" accept="image/*" multiple hidden></div>
+                <div class="dataset-actions"><label class="dataset-button" for="datasetFiles">＋ Choose images</label><button class="dataset-button primary" id="saveSamples" type="button" disabled>Add to dataset</button><button class="dataset-button" id="exportDataset" type="button" disabled>↓ Export data</button><input id="datasetFiles" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden></div>
               </div>
               <div class="dataset-grid" id="datasetGrid"><div class="panel empty-state"><strong>Your dataset starts here</strong><span>Choose facade photos, add labels, then save them in this browser.</span></div></div>
             </div>
@@ -271,18 +273,19 @@
               <div class="panel-head"><div><h2 class="panel-title">ESP32-CAM stream</h2><span class="panel-kicker">MJPEG · proxied through the local Python backend</span></div><span class="format-tag">LIVE</span></div>
               <img class="live-feed" id="cameraFeed" alt="Live video from the ESP32 camera" hidden>
               <div class="live-placeholder" id="cameraPlaceholder"><strong>Camera disconnected</strong><span>Connect the ESP32-CAM to the same Wi-Fi network as this laptop.</span></div>
-              <div class="live-controls"><button class="dataset-button primary" id="connectCamera" type="button">Connect stream</button><button class="dataset-button" id="stopCamera" type="button" disabled>Stop</button><button class="dataset-button" id="analyzeFrame" type="button" disabled>Analyze current frame</button><small id="cameraMessage">No camera connection active</small></div>
-              <div class="panel-head"><div><h2 class="panel-title">Roboflow predictions</h2><span class="panel-kicker" id="inferenceMessage">Waiting for model configuration</span></div></div>
-              <div class="sample-body" id="predictionList" aria-live="polite"><span class="panel-kicker">No frame analyzed.</span></div>
+              <div class="live-controls"><button class="dataset-button primary" id="connectCamera" type="button">Connect stream</button><button class="dataset-button" id="captureStill" type="button">Capture still</button><button class="dataset-button" id="stopCamera" type="button" disabled>Stop</button><button class="dataset-button" id="captureFrame" type="button" disabled>Save frame to dataset</button><label class="inference-provider" for="inferenceProvider">Analyze with<select id="inferenceProvider"><option value="ollama">Ollama · local</option><option value="roboflow">Roboflow · cloud</option></select></label><label class="dataset-button" for="analysisPhoto">Choose photo</label><input id="analysisPhoto" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden><button class="dataset-button" id="analyzePhoto" type="button" disabled>Analyze photo</button><button class="dataset-button" id="analyzeFrame" type="button" disabled>Analyze frame</button><small id="cameraMessage">No camera connection active</small></div>
+              <div class="panel-head"><div><h2 class="panel-title">Image analysis</h2><span class="panel-kicker" id="inferenceMessage">Checking local model</span></div></div>
+              <div class="sample-body" id="predictionList" aria-live="polite"><span class="panel-kicker">No frame analyzed. Image analysis does not reconstruct missing geometry.</span></div>
             </section>
             <aside class="live-readouts" aria-label="Camera and AI diagnostics">
               <div class="panel live-stat"><small>Stream status</small><strong class="live-state" id="cameraState" data-state="idle">Idle</strong></div>
               <div class="panel live-stat"><small>Frame resolution</small><strong id="cameraResolution">—</strong></div>
               <div class="panel live-stat"><small>Approx. frame rate</small><strong id="cameraFps">—</strong></div>
               <div class="panel live-stat"><small>Frames received</small><strong id="cameraFrames">0</strong></div>
+              <div class="panel live-stat"><small>Local Ollama model</small><strong id="ollamaState">Checking…</strong></div>
               <div class="panel live-stat"><small>Roboflow model</small><strong id="roboflowState">Not configured</strong></div>
               <div class="panel live-stat"><small>Robot commands</small><strong>Disabled</strong></div>
-              <div class="live-note"><strong>Prototype status.</strong> The live feed is real when the camera is connected. Detection, severity scoring, and physical commands are not implemented; no restoration action is sent to the robot.</div>
+              <div class="live-note"><strong>Analysis limits.</strong> Ollama analyzes images locally after its model is installed. Roboflow Cloud needs internet. Predictions describe visible pixels only; they do not infer hidden geometry, repair parts, or generate an STL.</div>
             </aside>
           </div>
         </section>
@@ -500,11 +503,12 @@
     }
 
     function setPendingFiles(files) {
-      pendingFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+      const selectedFiles = Array.from(files);
+      pendingFiles = selectedFiles.filter(file => file.type === 'image/jpeg' || file.type === 'image/png');
       document.getElementById('selectionLabel').textContent = pendingFiles.length ? `${pendingFiles.length} image${pendingFiles.length === 1 ? '' : 's'} selected` : 'No images selected';
       document.getElementById('saveSamples').disabled = pendingFiles.length === 0;
       document.getElementById('saveSamplesForm').disabled = pendingFiles.length === 0;
-      if (files.length && pendingFiles.length !== files.length) showToast('Some files were skipped because they are not images.');
+      if (pendingFiles.length !== selectedFiles.length) showToast('Only JPEG and PNG images can be added to the training dataset.');
     }
 
     document.getElementById('datasetFiles').addEventListener('change', event => setPendingFiles(event.target.files));
@@ -663,11 +667,12 @@
     }
     exportBtn.addEventListener('click', () => {
       const blob = new Blob([makeConceptObj()], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.href = url;
       link.download = 'cornice-concept.obj';
       link.click();
-      URL.revokeObjectURL(link.href);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       showToast('Concept OBJ downloaded. Validate before any fabrication.');
     });
     document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
@@ -676,11 +681,35 @@
     const cameraFeed = document.getElementById('cameraFeed');
     const cameraPlaceholder = document.getElementById('cameraPlaceholder');
     const analyzeFrameButton = document.getElementById('analyzeFrame');
+    const analyzePhotoButton = document.getElementById('analyzePhoto');
+    const analysisPhotoInput = document.getElementById('analysisPhoto');
+    const inferenceProvider = document.getElementById('inferenceProvider');
+    let selectedAnalysisPhoto = null;
     let roboflowConfigured = false;
+    let roboflowStatusMessage = 'Checking Roboflow configuration…';
+    let ollamaModelReady = false;
+    let ollamaStatusMessage = 'Checking local Ollama…';
+    let inferenceInProgress = false;
     let cameraPollTimer;
+    let cameraFrameTimer;
+    let cameraFrameInProgress = false;
+    let cameraLastFrameNumber = 0;
+    let cameraObjectUrl;
+    let hasRenderedCameraFrame = false;
 
     function updateInferenceAvailability() {
-      analyzeFrameButton.disabled = !roboflowConfigured || document.getElementById('cameraState').dataset.state !== 'streaming';
+      const isStreaming = document.getElementById('cameraState').dataset.state === 'streaming';
+      const providerReady = inferenceProvider.value === 'ollama' ? ollamaModelReady : roboflowConfigured;
+      analyzeFrameButton.disabled = !providerReady || !isStreaming || inferenceInProgress;
+      analyzePhotoButton.disabled = !providerReady || !selectedAnalysisPhoto || inferenceInProgress;
+      document.getElementById('captureFrame').disabled = !isStreaming;
+    }
+
+    function updateInferenceProviderMessage() {
+      if (inferenceInProgress) return;
+      document.getElementById('inferenceMessage').textContent = inferenceProvider.value === 'ollama'
+        ? ollamaStatusMessage
+        : roboflowStatusMessage;
     }
 
     async function refreshRoboflowStatus() {
@@ -690,13 +719,145 @@
         const status = await response.json();
         roboflowConfigured = Boolean(status.configured);
         document.getElementById('roboflowState').textContent = roboflowConfigured ? status.model_id : 'Not configured';
-        document.getElementById('inferenceMessage').textContent = roboflowConfigured ? 'Serverless Cloud · per-request inference' : 'Set server-side Roboflow model and API key';
+        roboflowStatusMessage = roboflowConfigured ? 'Roboflow Cloud · internet required' : 'Set server-side Roboflow model and API key';
       } catch {
         roboflowConfigured = false;
         document.getElementById('roboflowState').textContent = 'Backend offline';
-        document.getElementById('inferenceMessage').textContent = 'Start the local Python backend';
+        roboflowStatusMessage = 'Start the local Python backend';
       }
       updateInferenceAvailability();
+      updateInferenceProviderMessage();
+    }
+
+    async function refreshOllamaStatus() {
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/ollama/status`);
+        if (!response.ok) throw new Error(`Backend returned HTTP ${response.status}`);
+        const status = await response.json();
+        ollamaModelReady = Boolean(status.available && status.model_installed);
+        ollamaStatusMessage = status.message || (ollamaModelReady ? 'Local Ollama is ready' : 'Local Ollama model unavailable');
+        document.getElementById('ollamaState').textContent = ollamaModelReady
+          ? `Ready · ${status.model}`
+          : status.available ? `Install ${status.model}` : 'Ollama offline';
+      } catch {
+        ollamaModelReady = false;
+        ollamaStatusMessage = 'Start the local Python backend';
+        document.getElementById('ollamaState').textContent = 'Backend offline';
+      }
+      updateInferenceAvailability();
+      updateInferenceProviderMessage();
+    }
+
+    inferenceProvider.addEventListener('change', () => {
+      updateInferenceAvailability();
+      updateInferenceProviderMessage();
+    });
+
+    analysisPhotoInput.addEventListener('change', event => {
+      const file = event.target.files && event.target.files[0];
+      selectedAnalysisPhoto = file && ['image/jpeg', 'image/png'].includes(file.type) ? file : null;
+      if (file && !selectedAnalysisPhoto) {
+        analysisPhotoInput.value = '';
+        showToast('Choose a JPEG or PNG photo.');
+      } else if (selectedAnalysisPhoto) {
+        document.getElementById('cameraMessage').textContent = `Selected photo: ${selectedAnalysisPhoto.name}`;
+      }
+      updateInferenceAvailability();
+    });
+
+    function renderInferenceResult(result, provider) {
+      const results = document.getElementById('predictionList');
+      results.replaceChildren();
+      if (provider === 'ollama') {
+        const analysis = result.analysis;
+        if (!analysis) throw new Error('Local model returned no analysis.');
+        const summary = document.createElement('strong');
+        summary.className = 'panel-title';
+        summary.textContent = `Visible condition: ${analysis.condition}`;
+        results.append(summary);
+        [
+          ['Observations', analysis.observations],
+          ['Visible damage location', analysis.visible_damage_location],
+          ['Limitations', analysis.limitations]
+        ].forEach(([label, value]) => {
+          const item = document.createElement('p');
+          item.className = 'sample-meta';
+          item.textContent = `${label}: ${value}`;
+          results.append(item);
+        });
+        document.getElementById('inferenceMessage').textContent = `Local analysis · ${result.model}`;
+        return;
+      }
+
+      const predictions = Array.isArray(result.predictions) ? result.predictions : [];
+      const summary = document.createElement('strong');
+      summary.className = 'panel-title';
+      summary.textContent = predictions.length ? `${predictions.length} prediction${predictions.length === 1 ? '' : 's'}` : result.top ? `Top class: ${result.top}` : 'No detections returned';
+      results.append(summary);
+      predictions.forEach(prediction => {
+        const item = document.createElement('p');
+        item.className = 'sample-meta';
+        const label = prediction.class || prediction.class_name || prediction.label || 'Unlabeled prediction';
+        const confidence = Number(prediction.confidence);
+        item.textContent = Number.isFinite(confidence) ? `${label} · ${(confidence * 100).toFixed(1)}% confidence` : String(label);
+        results.append(item);
+      });
+      document.getElementById('inferenceMessage').textContent = 'One image analyzed · cloud inference';
+    }
+
+    async function submitImageForAnalysis(imageBlob, fileName) {
+      const provider = inferenceProvider.value;
+      inferenceInProgress = true;
+      updateInferenceAvailability();
+      document.getElementById('inferenceMessage').textContent = provider === 'ollama'
+        ? 'Analyzing one image locally…'
+        : 'Sending one image to Roboflow…';
+      try {
+        const formData = new FormData();
+        formData.append('image', imageBlob, fileName);
+        const response = await fetch(`${cameraApiBase}/api/v1/${provider}/predict`, { method: 'POST', body: formData });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `Inference failed with HTTP ${response.status}`);
+        renderInferenceResult(result, provider);
+      } catch (error) {
+        document.getElementById('inferenceMessage').textContent = error.message;
+      } finally {
+        inferenceInProgress = false;
+        updateInferenceAvailability();
+      }
+    }
+
+    analyzePhotoButton.addEventListener('click', () => {
+      if (selectedAnalysisPhoto) submitImageForAnalysis(selectedAnalysisPhoto, selectedAnalysisPhoto.name);
+    });
+
+    async function refreshCameraFrame() {
+      if (cameraFrameInProgress) return;
+      cameraFrameInProgress = true;
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/camera/frame`, { cache: 'no-store' });
+        if (response.status === 204) return;
+        if (!response.ok) throw new Error(`Frame request returned HTTP ${response.status}`);
+        const frameNumber = Number(response.headers.get('X-Frame-Number') || 0);
+        if (frameNumber && frameNumber <= cameraLastFrameNumber) return;
+
+        const nextObjectUrl = URL.createObjectURL(await response.blob());
+        cameraFeed.src = nextObjectUrl;
+        await cameraFeed.decode();
+        if (cameraObjectUrl) URL.revokeObjectURL(cameraObjectUrl);
+        cameraObjectUrl = nextObjectUrl;
+        cameraLastFrameNumber = frameNumber || cameraLastFrameNumber + 1;
+        hasRenderedCameraFrame = true;
+        cameraFeed.hidden = false;
+        cameraPlaceholder.hidden = true;
+        if (document.getElementById('cameraState').dataset.state === 'streaming') {
+          document.getElementById('cameraMessage').textContent = 'Receiving frames';
+        }
+      } catch (error) {
+        document.getElementById('cameraMessage').textContent = `Frame display error: ${error.message}`;
+      } finally {
+        cameraFrameInProgress = false;
+      }
     }
 
     async function refreshCameraStatus() {
@@ -705,7 +866,7 @@
         if (!response.ok) throw new Error(`Backend returned HTTP ${response.status}`);
         const status = await response.json();
         const state = status.state || 'idle';
-        const stateLabel = state === 'streaming' ? 'Streaming' : state === 'connecting' ? 'Connecting' : state === 'error' ? 'Connection error' : state === 'stopped' ? 'Stopped' : 'Idle';
+        const stateLabel = state === 'streaming' ? 'Streaming' : state === 'reconnecting' ? 'Reconnecting' : state === 'connecting' ? 'Connecting' : state === 'error' ? 'Connection error' : state === 'stopped' ? 'Stopped' : 'Idle';
         const stateElement = document.getElementById('cameraState');
         stateElement.textContent = stateLabel;
         stateElement.dataset.state = state;
@@ -714,9 +875,13 @@
         document.getElementById('cameraFps').textContent = status.fps ? `${status.fps} fps` : '—';
         document.getElementById('cameraFrames').textContent = status.frames_received || 0;
         if (state === 'streaming') {
-          cameraPlaceholder.hidden = true;
-          cameraFeed.hidden = false;
-          document.getElementById('cameraMessage').textContent = 'Receiving frames';
+          cameraPlaceholder.hidden = hasRenderedCameraFrame;
+          cameraFeed.hidden = !hasRenderedCameraFrame;
+          if (!hasRenderedCameraFrame) {
+            cameraPlaceholder.querySelector('strong').textContent = 'Receiving camera frames…';
+            cameraPlaceholder.querySelector('span').textContent = 'The WebSocket is connected; waiting for the first JPEG to render.';
+            document.getElementById('cameraMessage').textContent = 'Camera connected; loading frame';
+          }
         } else if (state === 'error') {
           cameraPlaceholder.hidden = false;
           cameraFeed.hidden = true;
@@ -726,6 +891,13 @@
           document.getElementById('connectCamera').disabled = false;
           document.getElementById('stopCamera').disabled = true;
           clearInterval(cameraPollTimer);
+          clearInterval(cameraFrameTimer);
+        } else if (state === 'reconnecting') {
+          cameraPlaceholder.hidden = false;
+          cameraFeed.hidden = true;
+          cameraPlaceholder.querySelector('strong').textContent = 'Reconnecting to car…';
+          cameraPlaceholder.querySelector('span').textContent = status.error || 'Waiting for binary JPEG frames from the ESP32 WebSocket.';
+          document.getElementById('cameraMessage').textContent = 'Retrying camera connection automatically';
         } else if (state === 'idle' || state === 'stopped') {
           document.getElementById('cameraMessage').textContent = state === 'idle' ? 'No camera connection active' : 'Stream stopped';
         }
@@ -741,6 +913,7 @@
         document.getElementById('connectCamera').disabled = false;
         document.getElementById('stopCamera').disabled = true;
         clearInterval(cameraPollTimer);
+        clearInterval(cameraFrameTimer);
       }
     }
 
@@ -749,19 +922,32 @@
       cameraPlaceholder.hidden = false;
       cameraPlaceholder.querySelector('strong').textContent = 'Connecting to camera…';
       cameraPlaceholder.querySelector('span').textContent = 'Waiting for the configured ESP32-CAM stream.';
-      cameraFeed.hidden = false;
-      cameraFeed.crossOrigin = 'anonymous';
-      cameraFeed.src = `${cameraApiBase}/api/v1/camera/stream?start=${Date.now()}`;
+      cameraPlaceholder.hidden = false;
+      cameraFeed.hidden = true;
+      hasRenderedCameraFrame = false;
+      cameraLastFrameNumber = 0;
+      if (cameraObjectUrl) {
+        URL.revokeObjectURL(cameraObjectUrl);
+        cameraObjectUrl = undefined;
+      }
       document.getElementById('connectCamera').disabled = true;
       document.getElementById('stopCamera').disabled = false;
       document.getElementById('cameraMessage').textContent = 'Opening local camera stream';
       refreshCameraStatus();
+      refreshCameraFrame();
       cameraPollTimer = setInterval(refreshCameraStatus, 1000);
+      cameraFrameTimer = setInterval(refreshCameraFrame, 100);
     });
 
     document.getElementById('stopCamera').addEventListener('click', () => {
       clearInterval(cameraPollTimer);
+      clearInterval(cameraFrameTimer);
       cameraFeed.removeAttribute('src');
+      if (cameraObjectUrl) {
+        URL.revokeObjectURL(cameraObjectUrl);
+        cameraObjectUrl = undefined;
+      }
+      hasRenderedCameraFrame = false;
       cameraFeed.hidden = true;
       cameraPlaceholder.hidden = false;
       cameraPlaceholder.querySelector('strong').textContent = 'Camera disconnected';
@@ -774,10 +960,60 @@
       document.getElementById('cameraMessage').textContent = 'Stream stopped';
     });
 
+    function stageCameraImage(blob, prefix) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const file = new File([blob], `${prefix}-${timestamp}.jpg`, { type: 'image/jpeg' });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      const datasetFiles = document.getElementById('datasetFiles');
+      datasetFiles.files = transfer.files;
+      datasetFiles.dispatchEvent(new Event('change', { bubbles: true }));
+      document.querySelector('.nav button[data-view="dataset"]').click();
+    }
+
+    document.getElementById('captureStill').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      document.getElementById('cameraMessage').textContent = 'Requesting one still from the car…';
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/camera/capture`);
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || `Camera returned HTTP ${response.status}`);
+        }
+        const savedPhoto = response.headers.get('X-Saved-Photo');
+        stageCameraImage(await response.blob(), 'car-still');
+        showToast(savedPhoto ? `Saved to Desktop/ESP car photos/${savedPhoto}` : 'Still received from the car.');
+        document.getElementById('cameraMessage').textContent = savedPhoto
+          ? `Saved to Desktop/ESP car photos/${savedPhoto}`
+          : 'Still received from the car';
+      } catch (error) {
+        document.getElementById('cameraMessage').textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.getElementById('captureFrame').addEventListener('click', () => {
+      if (!cameraFeed.naturalWidth || !cameraFeed.naturalHeight) {
+        showToast('Wait for a camera frame, then try again.');
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = cameraFeed.naturalWidth;
+      canvas.height = cameraFeed.naturalHeight;
+      canvas.getContext('2d').drawImage(cameraFeed, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) {
+          showToast('Could not capture this camera frame.');
+          return;
+        }
+        stageCameraImage(blob, 'car-frame');
+        showToast('Frame received. Review its labels, then add it to the dataset.');
+      }, 'image/jpeg', 0.92);
+    });
+
     analyzeFrameButton.addEventListener('click', async () => {
-      analyzeFrameButton.disabled = true;
-      document.getElementById('inferenceMessage').textContent = 'Sending one frame to Roboflow…';
-      const results = document.getElementById('predictionList');
       try {
         if (!cameraFeed.naturalWidth || !cameraFeed.naturalHeight) throw new Error('Wait for a camera frame before analyzing.');
         const canvas = document.createElement('canvas');
@@ -786,31 +1022,9 @@
         canvas.getContext('2d').drawImage(cameraFeed, 0, 0);
         const imageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
         if (!imageBlob) throw new Error('Could not capture the current camera frame.');
-        const formData = new FormData();
-        formData.append('image', imageBlob, 'camera-frame.jpg');
-        const response = await fetch(`${cameraApiBase}/api/v1/roboflow/predict`, { method: 'POST', body: formData });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.detail || `Inference failed with HTTP ${response.status}`);
-
-        const predictions = Array.isArray(result.predictions) ? result.predictions : [];
-        results.replaceChildren();
-        const summary = document.createElement('strong');
-        summary.className = 'panel-title';
-        summary.textContent = predictions.length ? `${predictions.length} prediction${predictions.length === 1 ? '' : 's'}` : result.top ? `Top class: ${result.top}` : 'No detections returned';
-        results.append(summary);
-        predictions.forEach(prediction => {
-          const item = document.createElement('p');
-          item.className = 'sample-meta';
-          const label = prediction.class || prediction.class_name || prediction.label || 'Unlabeled prediction';
-          const confidence = Number(prediction.confidence);
-          item.textContent = Number.isFinite(confidence) ? `${label} · ${(confidence * 100).toFixed(1)}% confidence` : String(label);
-          results.append(item);
-        });
-        document.getElementById('inferenceMessage').textContent = 'One frame analyzed · cloud inference';
+        await submitImageForAnalysis(imageBlob, 'camera-frame.jpg');
       } catch (error) {
         document.getElementById('inferenceMessage').textContent = error.message;
-      } finally {
-        updateInferenceAvailability();
       }
     });
 
@@ -830,6 +1044,7 @@
         if (view === 'live') {
           refreshCameraStatus();
           refreshRoboflowStatus();
+          refreshOllamaStatus();
         }
       } else {
         showToast(`${button.getAttribute('aria-label')} view is not connected yet.`);
