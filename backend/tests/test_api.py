@@ -3,6 +3,7 @@ import asyncio
 import io
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -65,6 +66,7 @@ class ConceptMeshApiTests(unittest.TestCase):
             api.CAMERA_FRAME_TIMES.clear()
             api.CAMERA_LATEST_JPEG = None
             api.CAMERA_FRAME_NUMBER = 0
+            api.CAMERA_LAST_FRAME_MONOTONIC = None
 
     def test_health_route(self):
         response = self.client.get("/api/health")
@@ -108,6 +110,7 @@ class ConceptMeshApiTests(unittest.TestCase):
             output_dir = Path(temp_dir) / "ESP car photos"
             with (
                 patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+                patch.object(api, "CAMERA_LAST_FRAME_MONOTONIC", time.monotonic()),
                 patch.object(api, "CAMERA_STATUS", {**api.CAMERA_STATUS, "state": "streaming", "width": 32, "height": 24}),
                 patch.object(api, "CAPTURE_PHOTO_DIR", output_dir),
                 patch("backend.main.urlopen") as camera_request,
@@ -127,7 +130,12 @@ class ConceptMeshApiTests(unittest.TestCase):
         camera_request.assert_not_called()
 
     def test_latest_frame_route_returns_cached_jpeg_and_frame_number(self):
-        with patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg), patch.object(api, "CAMERA_FRAME_NUMBER", 42):
+        with (
+            patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+            patch.object(api, "CAMERA_FRAME_NUMBER", 42),
+            patch.object(api, "CAMERA_LAST_FRAME_MONOTONIC", time.monotonic()),
+            patch.object(api, "CAMERA_STATUS", {**api.CAMERA_STATUS, "state": "streaming"}),
+        ):
             response = self.client.get("/api/v1/camera/frame")
 
         self.assertEqual(response.status_code, 200)
@@ -139,6 +147,38 @@ class ConceptMeshApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/camera/frame")
 
         self.assertEqual(response.status_code, 204)
+
+    def test_latest_frame_route_hides_cached_frame_after_camera_disconnects(self):
+        disconnected_status = {**api.CAMERA_STATUS, "state": "reconnecting"}
+        with (
+            patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+            patch.object(api, "CAMERA_FRAME_NUMBER", 42),
+            patch.object(api, "CAMERA_STATUS", disconnected_status),
+        ):
+            response = self.client.get("/api/v1/camera/frame")
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_latest_frame_route_hides_stale_frame_when_socket_stalls(self):
+        with (
+            patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+            patch.object(api, "CAMERA_LAST_FRAME_MONOTONIC", time.monotonic() - 10),
+            patch.object(api, "CAMERA_STATUS", {**api.CAMERA_STATUS, "state": "streaming"}),
+        ):
+            response = self.client.get("/api/v1/camera/frame")
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_camera_status_does_not_report_stale_fps_as_streaming(self):
+        with (
+            patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+            patch.object(api, "CAMERA_LAST_FRAME_MONOTONIC", time.monotonic() - 10),
+            patch.object(api, "CAMERA_STATUS", {**api.CAMERA_STATUS, "state": "streaming", "fps": 22.2}),
+        ):
+            status = self.client.get("/api/v1/camera/status").json()
+
+        self.assertEqual(status["state"], "reconnecting")
+        self.assertEqual(status["fps"], 0.0)
 
     def test_roboflow_status_does_not_expose_api_key(self):
         with patch.object(api, "ROBOFLOW_API_KEY", "private-test-key"), patch.object(api, "ROBOFLOW_MODEL_ID", "heritage-project/1"):
@@ -336,6 +376,25 @@ class ConceptMeshApiTests(unittest.TestCase):
         self.assertEqual(api.CAMERA_STATUS["state"], "reconnecting")
         self.assertEqual(api.CAMERA_STATUS["error"], "camera offline")
 
+    def test_receiver_reconnects_when_frames_stop(self):
+        async def run_receiver_once():
+            frame_received = asyncio.Event()
+            websocket = FakeCameraWebSocket(self.jpeg, frame_received)
+            with (
+                patch.object(api, "CAMERA_RECEIVE_TIMEOUT_SECONDS", 0.02),
+                patch("backend.main.websockets.connect", return_value=websocket),
+            ):
+                task = asyncio.create_task(api.receive_from_esp32())
+                await asyncio.wait_for(frame_received.wait(), timeout=1)
+                await asyncio.sleep(0.05)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run_receiver_once())
+        self.assertEqual(api.CAMERA_STATUS["state"], "reconnecting")
+        self.assertIn("No camera frames received", api.CAMERA_STATUS["error"])
+
     def test_receiver_timeout_explains_network_and_path_checks(self):
         async def run_receiver_once():
             with patch("backend.main.websockets.connect", side_effect=TimeoutError("opening handshake timed out")):
@@ -361,7 +420,12 @@ class ConceptMeshApiTests(unittest.TestCase):
             finally:
                 await iterator.aclose()
 
-        with patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg), patch.object(api, "CAMERA_FRAME_NUMBER", 1):
+        with (
+            patch.object(api, "CAMERA_LATEST_JPEG", self.jpeg),
+            patch.object(api, "CAMERA_FRAME_NUMBER", 1),
+            patch.object(api, "CAMERA_LAST_FRAME_MONOTONIC", time.monotonic()),
+            patch.object(api, "CAMERA_STATUS", {**api.CAMERA_STATUS, "state": "streaming"}),
+        ):
             response = api.camera_stream()
             body = asyncio.run(read_one_chunk())
 

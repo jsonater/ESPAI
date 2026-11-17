@@ -32,6 +32,8 @@ from backend.mesh_export import create_stepped_cornice
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_MODEL_BYTES = 50 * 1024 * 1024
+CAMERA_FRAME_MAX_AGE_SECONDS = 2.0
+CAMERA_RECEIVE_TIMEOUT_SECONDS = 5.0
 IMAGE_TYPES = {"image/jpeg", "image/png"}
 CAMERA_WEBSOCKET_URL = os.environ.get("ESP32_WEBSOCKET_URL", "ws://192.168.4.1/Camera")
 CAMERA_CAPTURE_URL = os.environ.get("ESP32_CAPTURE_URL", "http://192.168.4.1/capture")
@@ -47,6 +49,7 @@ CAMERA_STATUS_LOCK = threading.Lock()
 CAMERA_FRAME_TIMES: list[float] = []
 CAMERA_LATEST_JPEG: bytes | None = None
 CAMERA_FRAME_NUMBER = 0
+CAMERA_LAST_FRAME_MONOTONIC: float | None = None
 CAMERA_STATUS = {
     "state": "idle",
     "width": None,
@@ -79,7 +82,7 @@ class OllamaTimeoutError(Exception):
 
 async def receive_from_esp32() -> None:
     """Keep one WebSocket connection open and cache incoming binary JPEG frames."""
-    global CAMERA_FRAME_NUMBER, CAMERA_LATEST_JPEG
+    global CAMERA_FRAME_NUMBER, CAMERA_LATEST_JPEG, CAMERA_LAST_FRAME_MONOTONIC
     reconnect_delay = 1
     while True:
         with CAMERA_STATUS_LOCK:
@@ -96,7 +99,16 @@ async def receive_from_esp32() -> None:
                 proxy=None,
             ) as websocket:
                 reconnect_delay = 1
-                async for message in websocket:
+                with CAMERA_STATUS_LOCK:
+                    CAMERA_FRAME_TIMES.clear()
+                messages = aiter(websocket)
+                while True:
+                    try:
+                        message = await asyncio.wait_for(anext(messages), timeout=CAMERA_RECEIVE_TIMEOUT_SECONDS)
+                    except StopAsyncIteration:
+                        raise CameraStreamError("Camera WebSocket closed")
+                    except TimeoutError:
+                        raise CameraStreamError("No camera frames received; reconnecting to the car")
                     if isinstance(message, str):
                         raise CameraStreamError("Expected binary JPEG WebSocket frames, received text")
 
@@ -104,6 +116,7 @@ async def receive_from_esp32() -> None:
                     frame = decode_jpeg_frame(jpeg)
                     height, width = frame.shape[:2]
                     now = time.time()
+                    monotonic_now = time.monotonic()
                     with CAMERA_STATUS_LOCK:
                         CAMERA_FRAME_TIMES.append(now)
                         while CAMERA_FRAME_TIMES and now - CAMERA_FRAME_TIMES[0] > 5:
@@ -111,6 +124,7 @@ async def receive_from_esp32() -> None:
                         CAMERA_FRAME_NUMBER += 1
                         elapsed = CAMERA_FRAME_TIMES[-1] - CAMERA_FRAME_TIMES[0] if len(CAMERA_FRAME_TIMES) > 1 else 0
                         CAMERA_LATEST_JPEG = jpeg
+                        CAMERA_LAST_FRAME_MONOTONIC = monotonic_now
                         CAMERA_STATUS.update(
                             state="streaming",
                             width=width,
@@ -120,7 +134,6 @@ async def receive_from_esp32() -> None:
                             last_frame_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                             error=None,
                         )
-                raise CameraStreamError("Camera WebSocket closed")
         except asyncio.CancelledError:
             raise
         except TimeoutError as error:
@@ -176,7 +189,19 @@ def health() -> dict[str, str]:
 @app.get("/api/v1/camera/status")
 def camera_status() -> dict[str, str | int | float | None]:
     with CAMERA_STATUS_LOCK:
-        return {**CAMERA_STATUS, "source": CAMERA_WEBSOCKET_URL, "capture_source": CAMERA_CAPTURE_URL}
+        status = {**CAMERA_STATUS, "source": CAMERA_WEBSOCKET_URL, "capture_source": CAMERA_CAPTURE_URL}
+        if status["state"] == "streaming" and not camera_frame_is_fresh():
+            status.update(state="reconnecting", fps=0.0, error="No recent camera frames; waiting for the car")
+        return status
+
+
+def camera_frame_is_fresh() -> bool:
+    return (
+        CAMERA_STATUS["state"] == "streaming"
+        and CAMERA_LATEST_JPEG is not None
+        and CAMERA_LAST_FRAME_MONOTONIC is not None
+        and time.monotonic() - CAMERA_LAST_FRAME_MONOTONIC <= CAMERA_FRAME_MAX_AGE_SECONDS
+    )
 
 
 def save_capture_photo(jpeg: bytes) -> Path:
@@ -190,9 +215,9 @@ def save_capture_photo(jpeg: bytes) -> Path:
 
 @app.get("/api/v1/camera/frame")
 def latest_camera_frame() -> Response:
-    """Return the latest cached JPEG for browser clients that cannot render MJPEG."""
+    """Return a recent frame only while the camera WebSocket is streaming."""
     with CAMERA_STATUS_LOCK:
-        jpeg = CAMERA_LATEST_JPEG
+        jpeg = CAMERA_LATEST_JPEG if camera_frame_is_fresh() else None
         frame_number = CAMERA_FRAME_NUMBER
     if jpeg is None:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
@@ -210,7 +235,7 @@ def latest_camera_frame() -> Response:
 def capture_camera_image() -> Response:
     """Return the latest WebSocket frame, or fetch one HTTP still as a fallback."""
     with CAMERA_STATUS_LOCK:
-        latest_jpeg = CAMERA_LATEST_JPEG if CAMERA_STATUS["state"] == "streaming" else None
+        latest_jpeg = CAMERA_LATEST_JPEG if camera_frame_is_fresh() else None
         latest_width = CAMERA_STATUS["width"]
         latest_height = CAMERA_STATUS["height"]
     if latest_jpeg is not None:
@@ -268,7 +293,7 @@ def camera_stream() -> StreamingResponse:
         last_frame_number = 0
         while True:
             with CAMERA_STATUS_LOCK:
-                jpeg = CAMERA_LATEST_JPEG
+                jpeg = CAMERA_LATEST_JPEG if camera_frame_is_fresh() else None
                 frame_number = CAMERA_FRAME_NUMBER
             if jpeg is not None and frame_number != last_frame_number:
                 last_frame_number = frame_number

@@ -23,6 +23,7 @@
       --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 var(--sans); }
     button, select, input { font: inherit; }
     button { color: inherit; }
@@ -205,6 +206,14 @@
     @media (max-width: 980px) { .app { grid-template-columns: 66px minmax(0, 1fr); } .sidebar { padding: 20px 10px; align-items: center; } .brand { padding: 0; } .brand-name, .nav-label, .nav button span, .side-project, .side-bottom .profile > div { display: none; } .nav { width: 100%; } .nav button { justify-content: center; padding: 11px 0; } .side-bottom { padding: 13px 0 0; } .profile { justify-content: center; } .workspace { grid-template-columns: minmax(0, 1.35fr) minmax(255px, .8fr); } .content { padding: 22px 20px; } .topbar { padding: 0 20px; } }
     @media (max-width: 720px) { .workspace { grid-template-columns: 1fr; } .right-stack { grid-template-columns: 1fr 1fr; align-items: start; } .right-stack .model-panel, .right-stack .notice { grid-column: 1 / -1; } .content { padding: 18px 14px 25px; } .topbar { height: 53px; padding: 0 14px; } .page-heading { align-items: flex-start; } h1 { font-size: 25px; } .image-stage, .scene { height: 300px; min-height: 300px; } .sync { display: none; } }
     @media (max-width: 470px) { .app { grid-template-columns: 48px minmax(0, 1fr); } .sidebar { padding: 16px 5px; } .brand-mark { width: 29px; height: 29px; } .nav button { padding: 9px 0; } .top-actions { gap: 8px; } .crumb { font-size: 9px; } .record-btn { font-size: 9px; padding: 7px; } .evidence-row { gap: 8px; } .evidence { padding: 10px 8px; gap: 7px; } .evidence strong { font-size: 9px; } .right-stack { grid-template-columns: 1fr; } .right-stack .model-panel, .right-stack .notice { grid-column: auto; } .page-heading { margin-bottom: 15px; } .subtitle { max-width: 230px; } }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: minmax(0, 1fr); }
+      .sidebar { padding: 8px 10px; align-items: stretch; gap: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar > .brand, .sidebar > .side-bottom { display: none; }
+      .nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .nav button { flex-direction: column; gap: 4px; padding: 8px 2px; text-align: center; font-size: 10px; }
+      .nav button span { display: block; overflow-wrap: anywhere; }
+    }
   </style>
 </head>
 <body>
@@ -240,6 +249,7 @@
         <section id="datasetView" aria-label="Training image dataset">
           <div class="page-heading">
             <div><div class="eyebrow">Dataset workspace · stored on this device</div><h1>Training image library</h1><p class="subtitle">Collect and label facade photos before model training.</p></div>
+            <button class="dataset-button primary" id="openReconstruction" type="button">3D Reconstruction</button>
           </div>
           <div class="dataset-summary">
             <div class="panel summary-stat"><small>Saved images</small><strong id="sampleCount">0</strong></div>
@@ -298,15 +308,16 @@
 
         <section class="panel mesh-workflow" aria-label="Image-to-3D concept generation">
           <div class="panel-head"><div><h2 class="panel-title">3D concept model</h2><span class="panel-kicker">Hosted image-to-3D · local STL conversion</span></div></div>
-          <iframe class="mesh-generator-frame" src="https://stabilityai-stable-fast-3d.hf.space/" title="Stable Fast 3D image-to-mesh generator" loading="lazy"></iframe>
           <div class="live-controls">
+            <a class="dataset-button" href="https://stabilityai-stable-fast-3d.hf.space/" target="_blank" rel="noopener noreferrer">Open photo generator</a>
             <label class="dataset-button" for="generatedModelInput">Choose generated GLB</label>
             <input id="generatedModelInput" type="file" accept=".glb,model/gltf-binary,application/octet-stream" hidden>
             <button class="dataset-button" id="convertGlbToStl" type="button" disabled>Convert to STL</button>
+            <a class="dataset-button primary" id="downloadStl" hidden>Download STL</a>
             <small id="meshConversionStatus" aria-live="polite">No GLB selected</small>
-            <a class="dataset-button" href="https://stabilityai-stable-fast-3d.hf.space/" target="_blank" rel="noopener noreferrer">Open standalone fallback</a>
           </div>
           <div class="live-note"><strong>Powered by Stability AI Stable Fast 3D.</strong> The selected photo is uploaded only when you choose it in the hosted tool. Its single-image GLB becomes an approximate millimeter-scaled concept, not a historically verified repair or guaranteed print-ready part; verify dimensions before fabrication.</div>
+          <iframe class="mesh-generator-frame" src="https://stabilityai-stable-fast-3d.hf.space/" title="Stable Fast 3D image-to-mesh generator" loading="lazy"></iframe>
         </section>
 
         <div class="workspace" hidden>
@@ -690,6 +701,9 @@
       showToast('Concept OBJ downloaded. Validate before any fabrication.');
     });
     document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
+    document.getElementById('openReconstruction').addEventListener('click', () => {
+      document.querySelector('.nav button[data-view="reconstruction"]').click();
+    });
     const cameraApiBase = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : window.location.origin;
     const cameraFeed = document.getElementById('cameraFeed');
     const cameraPlaceholder = document.getElementById('cameraPlaceholder');
@@ -699,8 +713,10 @@
     const inferenceProvider = document.getElementById('inferenceProvider');
     const generatedModelInput = document.getElementById('generatedModelInput');
     const convertGlbToStlButton = document.getElementById('convertGlbToStl');
+    const downloadStl = document.getElementById('downloadStl');
     let selectedAnalysisPhoto = null;
     let selectedGeneratedModel = null;
+    let convertedStlUrl = null;
     let roboflowConfigured = false;
     let roboflowStatusMessage = 'Checking Roboflow configuration…';
     let ollamaModelReady = false;
@@ -784,6 +800,10 @@
     generatedModelInput.addEventListener('change', event => {
       const file = event.target.files && event.target.files[0];
       selectedGeneratedModel = file && file.name.toLowerCase().endsWith('.glb') ? file : null;
+      downloadStl.hidden = true;
+      downloadStl.removeAttribute('href');
+      if (convertedStlUrl) URL.revokeObjectURL(convertedStlUrl);
+      convertedStlUrl = null;
       convertGlbToStlButton.disabled = !selectedGeneratedModel;
       document.getElementById('meshConversionStatus').textContent = selectedGeneratedModel
         ? `Ready to convert ${selectedGeneratedModel.name}`
@@ -793,6 +813,7 @@
     convertGlbToStlButton.addEventListener('click', async () => {
       if (!selectedGeneratedModel) return;
       convertGlbToStlButton.disabled = true;
+      downloadStl.hidden = true;
       document.getElementById('meshConversionStatus').textContent = 'Converting GLB to STL locally…';
       try {
         const formData = new FormData();
@@ -803,15 +824,14 @@
           throw new Error(error.detail || `Conversion failed with HTTP ${response.status}`);
         }
         const stlBlob = await response.blob();
-        const objectUrl = URL.createObjectURL(stlBlob);
-        const link = document.createElement('a');
-        link.href = objectUrl;
-        link.download = selectedGeneratedModel.name.replace(/\.glb$/i, '.stl');
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        if (convertedStlUrl) URL.revokeObjectURL(convertedStlUrl);
+        convertedStlUrl = URL.createObjectURL(stlBlob);
+        downloadStl.href = convertedStlUrl;
+        downloadStl.download = selectedGeneratedModel.name.replace(/\.glb$/i, '.stl');
+        downloadStl.hidden = false;
         const faces = response.headers.get('X-Mesh-Faces');
         const watertight = response.headers.get('X-Mesh-Watertight');
-        document.getElementById('meshConversionStatus').textContent = `STL downloaded · ${faces || 'unknown'} faces · watertight: ${watertight || 'unknown'}`;
+        document.getElementById('meshConversionStatus').textContent = `STL ready · ${faces || 'unknown'} faces · watertight: ${watertight || 'unknown'}`;
       } catch (error) {
         document.getElementById('meshConversionStatus').textContent = error.message;
       } finally {
@@ -890,7 +910,14 @@
       cameraFrameInProgress = true;
       try {
         const response = await fetch(`${cameraApiBase}/api/v1/camera/frame`, { cache: 'no-store' });
-        if (response.status === 204) return;
+        if (response.status === 204) {
+          hasRenderedCameraFrame = false;
+          cameraFeed.hidden = true;
+          cameraPlaceholder.hidden = false;
+          cameraPlaceholder.querySelector('strong').textContent = 'Waiting for a fresh camera frame';
+          cameraPlaceholder.querySelector('span').textContent = 'Check the car power and Wi-Fi connection.';
+          return;
+        }
         if (!response.ok) throw new Error(`Frame request returned HTTP ${response.status}`);
         const frameNumber = Number(response.headers.get('X-Frame-Number') || 0);
         if (frameNumber && frameNumber <= cameraLastFrameNumber) return;
@@ -947,6 +974,7 @@
           clearInterval(cameraPollTimer);
           clearInterval(cameraFrameTimer);
         } else if (state === 'reconnecting') {
+          hasRenderedCameraFrame = false;
           cameraPlaceholder.hidden = false;
           cameraFeed.hidden = true;
           cameraPlaceholder.querySelector('strong').textContent = 'Reconnecting to car…';
