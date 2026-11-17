@@ -65,6 +65,7 @@
     .record-btn { border: 1px solid #c9d2c9; background: transparent; border-radius: 4px; padding: 8px 12px; font-size: 10px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
     .record-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
     .workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(285px, .8fr); align-items: start; gap: 16px; }
+    .workspace[hidden] { display: none; }
     .left-stack, .right-stack { min-width: 0; display: grid; gap: 14px; }
     .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
     .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 15px; border-bottom: 1px solid #e7eae5; }
@@ -187,6 +188,7 @@
     .live-state[data-state="error"]::before { background: var(--clay); }
     .live-note { padding: 11px 12px; border: 1px solid #eadbcf; background: #f7f0e9; color: #79614d; border-radius: 4px; font-size: 9px; line-height: 1.5; }
     .live-note strong { color: #614a38; }
+    .mesh-generator-frame { display: block; width: 100%; height: min(82vh, 900px); min-height: 650px; border: 0; background: #fff; }
     .spin { animation: spin 1.1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 720px) {
@@ -291,11 +293,23 @@
         </section>
         <div id="reconstructionView" hidden>
         <div class="page-heading">
-          <div><div class="eyebrow">Field record · Hegra, sector 04</div><h1>South facade</h1><p class="subtitle">Tomb 17 · Nabataean · 1st century CE · Capture 08:42 AST</p></div>
-          <button class="record-btn" id="recordBtn" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 17v3h14v-3"/></svg>Export record</button>
+          <div><div class="eyebrow">Single-image model workflow</div><h1>3D concept model</h1><p class="subtitle">Approximate shape only · verify dimensions before fabrication.</p></div>
         </div>
 
-        <div class="workspace">
+        <section class="panel mesh-workflow" aria-label="Image-to-3D concept generation">
+          <div class="panel-head"><div><h2 class="panel-title">3D concept model</h2><span class="panel-kicker">Hosted image-to-3D · local STL conversion</span></div></div>
+          <iframe class="mesh-generator-frame" src="https://stabilityai-stable-fast-3d.hf.space/" title="Stable Fast 3D image-to-mesh generator" loading="lazy"></iframe>
+          <div class="live-controls">
+            <label class="dataset-button" for="generatedModelInput">Choose generated GLB</label>
+            <input id="generatedModelInput" type="file" accept=".glb,model/gltf-binary,application/octet-stream" hidden>
+            <button class="dataset-button" id="convertGlbToStl" type="button" disabled>Convert to STL</button>
+            <small id="meshConversionStatus" aria-live="polite">No GLB selected</small>
+            <a class="dataset-button" href="https://stabilityai-stable-fast-3d.hf.space/" target="_blank" rel="noopener noreferrer">Open standalone fallback</a>
+          </div>
+          <div class="live-note"><strong>Powered by Stability AI Stable Fast 3D.</strong> The selected photo is uploaded only when you choose it in the hosted tool. Its single-image GLB becomes an approximate millimeter-scaled concept, not a historically verified repair or guaranteed print-ready part; verify dimensions before fabrication.</div>
+        </section>
+
+        <div class="workspace" hidden>
           <section class="left-stack" aria-label="Facade evidence">
             <div class="panel">
               <div class="panel-head"><div><h2 class="panel-title">Source capture</h2><span class="panel-kicker">Elevation view · damage mask overlay</span></div><div class="canvas-tools"><span class="tool-pill">1.0×</span><span class="tool-pill">Mask on</span></div></div>
@@ -676,7 +690,6 @@
       showToast('Concept OBJ downloaded. Validate before any fabrication.');
     });
     document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
-    document.getElementById('recordBtn').addEventListener('click', () => showToast('Field record export is not connected in this prototype.'));
     const cameraApiBase = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : window.location.origin;
     const cameraFeed = document.getElementById('cameraFeed');
     const cameraPlaceholder = document.getElementById('cameraPlaceholder');
@@ -684,7 +697,10 @@
     const analyzePhotoButton = document.getElementById('analyzePhoto');
     const analysisPhotoInput = document.getElementById('analysisPhoto');
     const inferenceProvider = document.getElementById('inferenceProvider');
+    const generatedModelInput = document.getElementById('generatedModelInput');
+    const convertGlbToStlButton = document.getElementById('convertGlbToStl');
     let selectedAnalysisPhoto = null;
+    let selectedGeneratedModel = null;
     let roboflowConfigured = false;
     let roboflowStatusMessage = 'Checking Roboflow configuration…';
     let ollamaModelReady = false;
@@ -763,6 +779,44 @@
         document.getElementById('cameraMessage').textContent = `Selected photo: ${selectedAnalysisPhoto.name}`;
       }
       updateInferenceAvailability();
+    });
+
+    generatedModelInput.addEventListener('change', event => {
+      const file = event.target.files && event.target.files[0];
+      selectedGeneratedModel = file && file.name.toLowerCase().endsWith('.glb') ? file : null;
+      convertGlbToStlButton.disabled = !selectedGeneratedModel;
+      document.getElementById('meshConversionStatus').textContent = selectedGeneratedModel
+        ? `Ready to convert ${selectedGeneratedModel.name}`
+        : 'Choose a binary .glb file';
+    });
+
+    convertGlbToStlButton.addEventListener('click', async () => {
+      if (!selectedGeneratedModel) return;
+      convertGlbToStlButton.disabled = true;
+      document.getElementById('meshConversionStatus').textContent = 'Converting GLB to STL locally…';
+      try {
+        const formData = new FormData();
+        formData.append('model', selectedGeneratedModel, selectedGeneratedModel.name);
+        const response = await fetch(`${cameraApiBase}/api/v1/mesh/glb-to-stl`, { method: 'POST', body: formData });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || `Conversion failed with HTTP ${response.status}`);
+        }
+        const stlBlob = await response.blob();
+        const objectUrl = URL.createObjectURL(stlBlob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = selectedGeneratedModel.name.replace(/\.glb$/i, '.stl');
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        const faces = response.headers.get('X-Mesh-Faces');
+        const watertight = response.headers.get('X-Mesh-Watertight');
+        document.getElementById('meshConversionStatus').textContent = `STL downloaded · ${faces || 'unknown'} faces · watertight: ${watertight || 'unknown'}`;
+      } catch (error) {
+        document.getElementById('meshConversionStatus').textContent = error.message;
+      } finally {
+        convertGlbToStlButton.disabled = !selectedGeneratedModel;
+      }
     });
 
     function renderInferenceResult(result, provider) {

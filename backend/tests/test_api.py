@@ -384,6 +384,35 @@ class ConceptMeshApiTests(unittest.TestCase):
         self.assertTrue(mesh.is_watertight)
         self.assertEqual(mesh.extents.tolist(), [90, 42, 36])
 
+    def test_converts_valid_glb_to_downloadable_stl(self):
+        source_mesh = trimesh.creation.box(extents=[0.04, 0.02, 0.01])
+        glb_bytes = source_mesh.export(file_type="glb")
+
+        response = self.client.post(
+            "/api/v1/mesh/glb-to-stl",
+            files={"model": ("concept.glb", glb_bytes, "model/gltf-binary")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "model/stl")
+        self.assertEqual(response.headers["x-geometry-mode"], "single-image-ai-concept-not-repair")
+        self.assertEqual(response.headers["x-output-units"], "mm")
+        converted = trimesh.load(io.BytesIO(response.content), file_type="stl", force="mesh")
+        self.assertEqual(converted.extents.tolist(), [40, 20, 10])
+
+    def test_rejects_invalid_glb_conversion_inputs(self):
+        wrong_type = self.client.post(
+            "/api/v1/mesh/glb-to-stl",
+            files={"model": ("concept.obj", b"mesh", "application/octet-stream")},
+        )
+        invalid_glb = self.client.post(
+            "/api/v1/mesh/glb-to-stl",
+            files={"model": ("concept.glb", b"not a GLB", "model/gltf-binary")},
+        )
+
+        self.assertEqual(wrong_type.status_code, 415)
+        self.assertEqual(invalid_glb.status_code, 400)
+
     def test_rejects_bad_image_and_invalid_dimensions(self):
         bad_image = self.client.post(
             "/api/v1/concept-mesh",

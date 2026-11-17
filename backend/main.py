@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import os
+import struct
 import threading
 import time
-import requests
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from urllib.request import Request, urlopen
 
 import cv2
 import numpy as np
+import trimesh
 import websockets
 from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -29,6 +31,7 @@ from backend.camera_stream import CameraStreamError, decode_jpeg_frame
 from backend.mesh_export import create_stepped_cornice
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_MODEL_BYTES = 50 * 1024 * 1024
 IMAGE_TYPES = {"image/jpeg", "image/png"}
 CAMERA_WEBSOCKET_URL = os.environ.get("ESP32_WEBSOCKET_URL", "ws://192.168.4.1/Camera")
 CAMERA_CAPTURE_URL = os.environ.get("ESP32_CAPTURE_URL", "http://192.168.4.1/capture")
@@ -481,5 +484,63 @@ async def export_concept_mesh(
             "Content-Disposition": 'attachment; filename="cornice-concept.stl"',
             "X-Image-Resolution": f"{image_width}x{image_height}",
             "X-Geometry-Mode": "dimensioned-parametric-placeholder",
+        },
+    )
+
+
+@app.post("/api/v1/mesh/glb-to-stl")
+async def convert_glb_to_stl(model: UploadFile = File(...)) -> Response:
+    """Convert a generated GLB concept mesh to STL; this does not repair geometry."""
+    filename = Path(model.filename or "").name
+    if Path(filename).suffix.lower() != ".glb":
+        raise HTTPException(status_code=415, detail="Upload a binary GLB model")
+    if model.content_type not in {"model/gltf-binary", "application/octet-stream", ""}:
+        raise HTTPException(status_code=415, detail="Upload a binary GLB model")
+
+    model_bytes = await model.read(MAX_MODEL_BYTES + 1)
+    await model.close()
+    if not model_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded GLB is empty")
+    if len(model_bytes) > MAX_MODEL_BYTES:
+        raise HTTPException(status_code=413, detail="GLB exceeds the 50 MiB upload limit")
+
+    try:
+        if len(model_bytes) < 20 or model_bytes[:4] != b"glTF":
+            raise ValueError("File does not have a GLB header")
+        version, declared_length = struct.unpack_from("<II", model_bytes, 4)
+        json_length, json_chunk_type = struct.unpack_from("<II", model_bytes, 12)
+        if version != 2 or declared_length != len(model_bytes) or json_chunk_type != 0x4E4F534A:
+            raise ValueError("GLB header or JSON chunk is invalid")
+        if json_length > len(model_bytes) - 20:
+            raise ValueError("GLB JSON chunk is truncated")
+        glb_document = json.loads(model_bytes[20:20 + json_length].decode("utf-8").rstrip(" \x00"))
+        resources = glb_document.get("buffers", []) + glb_document.get("images", [])
+        if any(isinstance(resource, dict) and resource.get("uri") for resource in resources):
+            raise ValueError("GLB references external files; upload a self-contained binary GLB")
+
+        scene = trimesh.load(io.BytesIO(model_bytes), file_type="glb", force="scene")
+        mesh = scene.to_geometry()
+        if not isinstance(mesh, trimesh.Trimesh) or mesh.is_empty:
+            raise ValueError("GLB contains no triangle mesh")
+        if mesh.is_empty or not np.isfinite(mesh.vertices).all():
+            raise ValueError("GLB contains no finite mesh geometry")
+        mesh.apply_scale(1000.0)
+        stl_bytes = mesh.export(file_type="stl")
+        verified_mesh = trimesh.load(io.BytesIO(stl_bytes), file_type="stl", force="mesh")
+        if verified_mesh.is_empty or len(verified_mesh.faces) == 0:
+            raise ValueError("Converted STL contains no triangles")
+    except (ValueError, TypeError, KeyError, IndexError, UnicodeDecodeError, struct.error) as error:
+        raise HTTPException(status_code=400, detail=f"Could not convert GLB mesh: {error}") from error
+
+    return Response(
+        content=stl_bytes,
+        media_type="model/stl",
+        headers={
+            "Content-Disposition": 'attachment; filename="image-concept.stl"',
+            "X-Mesh-Vertices": str(len(verified_mesh.vertices)),
+            "X-Mesh-Faces": str(len(verified_mesh.faces)),
+            "X-Mesh-Watertight": str(verified_mesh.is_watertight).lower(),
+            "X-Output-Units": "mm",
+            "X-Geometry-Mode": "single-image-ai-concept-not-repair",
         },
     )
