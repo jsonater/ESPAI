@@ -64,6 +64,20 @@ The default IP is only an example; use the address and stream route printed by y
 
 The API binds to localhost by default. To let the ESP32 reach it over a trusted local network, use `--host 0.0.0.0` and allow port 8000 through the laptop firewall. This prototype has no authentication; do not expose it to the public internet.
 
+## Offline whitefill STL tool
+
+The backend now also exposes a local whitefill tool for classroom tests that do not need internet or API keys:
+
+- Open `http://127.0.0.1:8000/whitefill`
+- Upload or capture 1-8 photos
+- Click **Make STL** to generate one STL per detected piece
+
+This workflow targets only pure-white cubes and triangles and ignores other colors and shapes. Marker print and result downloads are available from:
+
+- `GET /api/v1/whitefill/marker`
+- `POST /api/v1/whitefill/analyze`
+- `GET /api/v1/whitefill/files/{batch}/{scan}/{name}`
+
 ## Tests
 
 ```sh

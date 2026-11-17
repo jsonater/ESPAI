@@ -249,7 +249,10 @@
         <section id="datasetView" aria-label="Training image dataset">
           <div class="page-heading">
             <div><div class="eyebrow">Dataset workspace · stored on this device</div><h1>Training image library</h1><p class="subtitle">Collect and label facade photos before model training.</p></div>
-            <button class="dataset-button primary" id="openReconstruction" type="button">3D Reconstruction</button>
+            <div class="dataset-actions">
+              <button class="dataset-button" id="openWhitefill" type="button">Whitefill STL (offline)</button>
+              <button class="dataset-button primary" id="openReconstruction" type="button">3D Reconstruction</button>
+            </div>
           </div>
           <div class="dataset-summary">
             <div class="panel summary-stat"><small>Saved images</small><strong id="sampleCount">0</strong></div>
@@ -703,6 +706,9 @@
     document.getElementById('saveBtn').addEventListener('click', () => showToast('Record saved in this browser session.'));
     document.getElementById('openReconstruction').addEventListener('click', () => {
       document.querySelector('.nav button[data-view="reconstruction"]').click();
+    });
+    document.getElementById('openWhitefill').addEventListener('click', () => {
+      window.location.href = '/whitefill';
     });
     const cameraApiBase = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : window.location.origin;
     const cameraFeed = document.getElementById('cameraFeed');

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>White fill · ESPAI</title>
+<style>
+  :root { color-scheme: light; --paper:#f1f2ed; --surface:#fbfcf9; --ink:#202923; --muted:#758078; --line:#dce1d9;
+          --green:#395d4e; --green-dark:#274538; --green-pale:#e2ebe4; --clay:#b66348; --clay-pale:#f3e5de;
+          --sans:"Avenir Next", Avenir, "Segoe UI", sans-serif; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 var(--sans); }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 22px; border-bottom: 1px solid var(--line); background: #e9ece6; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .4px; }
+  h1 small { display: block; font-weight: 500; font-size: 12px; color: var(--muted); letter-spacing: 0; }
+  a { color: var(--green-dark); }
+  main { display: grid; gap: 16px; padding: 18px 22px; grid-template-columns: 1fr; }
+  @media (min-width: 1000px) { main { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  h2 { margin: 0 0 10px; font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); }
+  video { width: 100%; aspect-ratio: 4/3; background: #1c221e; border-radius: 8px; object-fit: contain; display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 7px; padding: 9px 13px; cursor: pointer; text-decoration: none; display: inline-block; }
+  button.primary, .btn.primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 650; }
+  button.big { width: 100%; padding: 13px; font-size: 15px; margin-top: 12px; }
+  button:disabled { opacity: .45; cursor: default; }
+  select, input[type=number] { font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: #fff; }
+  input[type=number] { width: 88px; }
+  #drop { border: 2px dashed var(--line); border-radius: 8px; padding: 12px; text-align: center; color: var(--muted); margin-top: 10px; }
+  #drop.over { border-color: var(--green); color: var(--green-dark); }
+  #thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .thumb { position: relative; }
+  .thumb img { width: 92px; height: 69px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+  .thumb button { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; padding: 0; border-radius: 50%; background: var(--clay); border-color: var(--clay); color: #fff; line-height: 1; }
+  label.field { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 8px 0; color: #4f5a53; }
+  .note { background: var(--green-pale); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  #status { min-height: 22px; margin-top: 10px; }
+  #status.err { color: var(--clay); }
+  #sheet { width: 100%; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; margin-bottom: 10px; }
+  #viewer { width: 100%; height: 320px; border-radius: 8px; background: #1c221e; margin-bottom: 10px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; }
+  .kv b { font-weight: 500; color: var(--muted); }
+  .headline { font-size: 20px; font-weight: 700; color: var(--green-dark); margin: 4px 0 10px; }
+  .part { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; margin: 6px 0; cursor: pointer; background: #fff; }
+  .part.sel { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+  .part small { color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 44px 10px; line-height: 1.7; }
+  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--green); border-top-color: transparent; border-radius: 50%; animation: s 1s linear infinite; vertical-align: middle; margin-right: 8px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+</head>
+<body>
+<header>
+  <h1>White fill<small>Pure-white cubes and triangles → 3D-printable STL</small></h1>
+  <a id="back" href="/">← Back to dashboard</a>
+</header>
+<main>
+  <section class="panel" aria-label="Photos and settings">
+    <h2>1 · Photos</h2>
+    <video id="video" autoplay playsinline muted></video>
+    <div class="row">
+      <button class="primary" id="snap" type="button">Take photo (laptop camera)</button>
+      <select id="cams" aria-label="Camera"></select>
+      <button id="carFrame" type="button">Use car camera frame</button>
+    </div>
+    <div id="drop">Or drag photos here ·
+      <label class="btn">Choose files<input id="files" type="file" accept="image/jpeg,image/png" multiple hidden></label>
+    </div>
+    <div id="thumbs"></div>
+
+    <h2 style="margin-top:18px">2 · Settings</h2>
+    <div class="note">Only <b>pure white</b> cubes and triangles are used. Other colours, mixed colours, other shapes and big objects are ignored.</div>
+    <label class="field">What the STL fills
+      <select id="fill">
+        <option value="white" selected>The pure white, exactly</option>
+        <option value="missing">The broken-off part of each piece</option>
+      </select>
+    </label>
+    <label class="field">Marker size in the photo (mm) · <a href="/api/v1/whitefill/marker">print marker</a><input type="number" id="marker_mm" value="50" min="0" step="1"></label>
+    <label class="field">Scale if no marker (mm per pixel)<input type="number" id="mm_per_px" value="0.5" min="0.01" step="0.05"></label>
+    <label class="field">Part height in mm (0 = same as cube width)<input type="number" id="height_mm" value="0" min="0" step="1"></label>
+    <label class="field">Shrink all round for fit (mm)<input type="number" id="clearance_mm" value="0" min="0" step="0.1"></label>
+    <label class="field">Biggest piece to use (mm)<input type="number" id="max_piece_mm" value="120" min="1" step="5"></label>
+    <label class="field">Smallest piece to use (mm)<input type="number" id="min_piece_mm" value="5" min="1" step="1"></label>
+    <button class="primary big" id="go" type="button" disabled>Make STL</button>
+    <div id="status" role="status"></div>
+  </section>
+
+  <section class="panel" aria-label="Result">
+    <h2>3 · Result</h2>
+    <div id="empty" class="empty">Photograph the white pieces from straight above.<br>Tape the printed 50 mm marker flat next to them for true size.<br>Take 3–5 photos; they are measured and combined.</div>
+    <img id="sheet" alt="Measurement sheet" title="Open full size" hidden>
+    <div id="viewer" hidden></div>
+    <div id="headline" class="headline"></div>
+    <div id="summary" class="kv"></div>
+    <div id="parts"></div>
+    <div class="row" id="downloads"></div>
+  </section>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const photos = [];
+  const MAX_PHOTOS = 8;
+  let stream = null;
+
+  function setStatus(text, isError) { $('status').innerHTML = text; $('status').className = isError ? 'err' : ''; }
+
+  async function startCamera(deviceId) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+      $('video').srcObject = stream; $('snap').disabled = false;
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      $('cams').innerHTML = cams.map((d, i) => `<option value="${d.deviceId}">${d.label || 'Camera ' + (i + 1)}</option>`).join('');
+      if (deviceId) $('cams').value = deviceId;
+    } catch (error) {
+      $('snap').disabled = true;
+      setStatus('No laptop camera available. You can still add photo files.', false);
+    }
+  }
+  $('cams').onchange = () => startCamera($('cams').value);
+
+  function addPhoto(blob) {
+    if (photos.length >= MAX_PHOTOS) { setStatus(`At most ${MAX_PHOTOS} photos per scan.`, true); return; }
+    photos.push(blob); renderThumbs();
+  }
+  function renderThumbs() {
+    $('thumbs').innerHTML = '';
+    photos.forEach((blob, i) => {
+      const el = document.createElement('div'); el.className = 'thumb';
+      el.innerHTML = `<img alt="Photo ${i + 1}" src="${URL.createObjectURL(blob)}"><button type="button" aria-label="Remove photo ${i + 1}">×</button>`;
+      el.querySelector('button').onclick = () => { photos.splice(i, 1); renderThumbs(); };
+      $('thumbs').appendChild(el);
+    });
+    $('go').disabled = !photos.length;
+    $('go').textContent = photos.length ? `Make STL (${photos.length} photo${photos.length > 1 ? 's' : ''})` : 'Make STL';
+  }
+  $('snap').onclick = () => {
+    const v = $('video'); if (!v.videoWidth) return;
+    const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext('2d').drawImage(v, 0, 0); c.toBlob(addPhoto, 'image/jpeg', 0.92);
+  };
+  $('carFrame').onclick = async () => {
+    try {
+      const response = await fetch('/api/v1/camera/frame', { cache: 'no-store' });
+      if (!response.ok) throw new Error();
+      addPhoto(await response.blob());
+    } catch (error) { setStatus('No car camera frame available. Connect to the car Wi-Fi and start the full app.', true); }
+  };
+  $('files').onchange = e => { [...e.target.files].forEach(addPhoto); e.target.value = ''; };
+  const drop = $('drop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); [...e.dataTransfer.files].filter(f => f.type.startsWith('image/')).forEach(addPhoto); };
+  $('fill').onchange = () => { $('clearance_mm').value = $('fill').value === 'white' ? 0 : 0.4; };
+
+  $('go').onclick = async () => {
+    const form = new FormData();
+    photos.forEach((blob, i) => form.append('photos', blob, `photo${i}.jpg`));
+    ['fill', 'marker_mm', 'mm_per_px', 'height_mm', 'clearance_mm', 'max_piece_mm', 'min_piece_mm'].forEach(k => form.append(k, $(k).value));
+    $('go').disabled = true; setStatus('<span class="spin"></span>Finding the pure white and measuring it…');
+    try {
+      const response = await fetch('/api/v1/whitefill/analyze', { method: 'POST', body: form });
+      const result = await response.json();
+      if (!response.ok) { setStatus(result.detail || 'The scan failed.', true); return; }
+      if (!result.ok) { setStatus(result.message, true); return; }
+      setStatus('STL ready.'); show(result);
+    } catch (error) { setStatus('Could not reach the app. Is it still running?', true); }
+    finally { $('go').disabled = !photos.length; }
+  };
+
+  function show(r) {
+    const url = name => `${r.files_url}/${name}`;
+    $('empty').hidden = true;
+    $('sheet').src = url(r.sheet); $('sheet').hidden = false; $('sheet').onclick = () => window.open(url(r.sheet));
+    $('headline').textContent = `${r.parts.length} STL file${r.parts.length > 1 ? 's' : ''} made`;
+    const ignored = Object.entries(r.skipped).filter(([, v]) => v).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'nothing';
+    $('summary').innerHTML = `
+      <b>Fills</b><span>${r.fill === 'white' ? 'the pure white exactly, nothing around it' : 'the broken-off part of each piece'}</span>
+      <b>Ignored</b><span>${ignored}</span>
+      <b>Scale</b><span>${r.scale_source}</span>
+      <b>Photos used</b><span>${r.photos_measured} of ${r.photos_total}</span>`;
+    $('parts').innerHTML = r.parts.map((p, i) => `<div class="part${i ? '' : ' sel'}" data-i="${i}">
+      <span><b>#${i + 1} ${p.kind}</b> · ${p.width_mm} × ${p.length_mm} × ${p.height_mm} mm<br>
+      <small>${p.shape_sides_mm ? `sides ${p.shape_sides_mm.join(' × ')} mm · ` : ''}${p.pos_mm ? `at ${p.pos_mm[0]}, ${p.pos_mm[1]} mm from marker · ` : ''}${p.volume_cm3} cm³${p.spread_mm != null ? ` · ± ${p.spread_mm} mm` : ''}</small></span>
+      <a class="btn primary" href="${url(p.stl)}?download=true">Download STL</a></div>`).join('');
+    document.querySelectorAll('.part').forEach(el => {
+      el.querySelector('a').onclick = e => e.stopPropagation();
+      el.onclick = () => {
+        document.querySelectorAll('.part').forEach(x => x.classList.remove('sel')); el.classList.add('sel');
+        if (window.showSTL) window.showSTL(url(r.parts[+el.dataset.i].stl));
+      };
+    });
+    $('downloads').innerHTML = `<a class="btn" href="${url(r.sheet)}?download=true">Download measurement sheet</a>`;
+    if (window.showSTL) window.showSTL(url(r.parts[0].stl));
+  }
+  fetch('/api/health').then(r => r.json()).then(h => {
+    if (String(h.mode || '').includes('laptop')) { $('back').hidden = true; $('carFrame').hidden = true; }
+  }).catch(() => {});
+  startCamera();
+</script>
+
+<script type="module">
+  // 3D preview. Needs internet once to load three.js; skipped quietly when offline (e.g. on the car Wi-Fi).
+  try {
+    const THREE = await import('three');
+    const { STLLoader } = await import('three/addons/loaders/STLLoader.js');
+    const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+    const el = document.getElementById('viewer');
+    let renderer, scene, camera, controls, mesh;
+    function init() {
+      el.hidden = false;
+      renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(devicePixelRatio);
+      renderer.setSize(el.clientWidth, el.clientHeight); el.appendChild(renderer.domElement);
+      scene = new THREE.Scene(); scene.background = new THREE.Color(0x1c221e);
+      camera = new THREE.PerspectiveCamera(40, el.clientWidth / el.clientHeight, 0.1, 10000);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x334433, 1.2));
+      const light = new THREE.DirectionalLight(0xffffff, 1.6); light.position.set(1, 1.5, 2); scene.add(light);
+      controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
+      (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+      addEventListener('resize', () => { renderer.setSize(el.clientWidth, el.clientHeight); camera.aspect = el.clientWidth / el.clientHeight; camera.updateProjectionMatrix(); });
+    }
+    window.showSTL = url => {
+      if (!renderer) init();
+      new STLLoader().load(url, geometry => {
+        if (mesh) scene.remove(mesh);
+        geometry.computeBoundingBox(); geometry.center(); geometry.computeVertexNormals();
+        mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: .7, metalness: .05 }));
+        mesh.rotation.x = -0.9; scene.add(mesh);
+        const size = geometry.boundingBox.getSize(new THREE.Vector3()), r = Math.max(size.x, size.y, size.z);
+        camera.position.set(0, -r * 0.4, r * 2.2); camera.lookAt(0, 0, 0); controls.target.set(0, 0, 0);
+      });
+    };
+  } catch (error) { console.log('3D preview unavailable (offline)'); }
+</script>
+</body>
+</html>

@@ -13,10 +13,10 @@ Start (simple, stops when you close the terminal / press Ctrl+C):
   .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 Stop:
-  pkill -f "uvicorn backend.main:app"
+  pkill -TERM -f '[u]vicorn backend.main:app'
 
 Restart (stop, wait, start):
-  pkill -f "uvicorn backend.main:app"; sleep 1; cd ~/Documents/ESPAI && setsid nohup .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/espai.log 2>&1 < /dev/null &
+  pkill -TERM -f '[u]vicorn backend.main:app'; sleep 1; cd ~/Documents/ESPAI && setsid nohup .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/espai.log 2>&1 < /dev/null &
 
 Is it running? (should print {"status":"ok",...})
   curl http://127.0.0.1:8000/api/health
@@ -26,7 +26,7 @@ See the server log / errors:
   tail -f /tmp/espai.log          (live, Ctrl+C to leave)
 
 "Address already in use" error (something is on port 8000):
-  pkill -f "uvicorn backend.main:app"
+  pkill -TERM -f '[u]vicorn backend.main:app'
   ss -ltnp | grep 8000            (shows what is using the port)
 
 ----------------------------------------------------------------
@@ -99,11 +99,11 @@ AI classifier tests:
   git clone https://github.com/jsonater/ESPAI.git
   cd ESPAI
   python3 -m venv .venv
-  .venv/bin/pip install -r backend/requirements.txt gradio_client
+  .venv/bin/pip install -r backend/requirements.txt
   .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 Venv missing / broken imports:
-  rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt gradio_client
+  rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt
 
 ----------------------------------------------------------------
 7. GITHUB
@@ -120,13 +120,31 @@ Download your friend's / latest changes:
 Undo uncommitted edits to ONE file (cannot be undone!):
   git checkout -- path/to/file
 
-Never commit API keys. Keep them in a .env file (not uploaded).
+Never commit API keys. Keep them out of source control; prefer a private file
+with owner-only permissions (chmod 600) or environment variables set locally.
 
 ----------------------------------------------------------------
 8. QUICK FIX TABLE
 ----------------------------------------------------------------
 127.0.0.1:8000 won't load      -> section 1: start the app, check /api/health
 Camera says stale / no frame   -> section 2: close other viewers, power-cycle car
-Port already in use            -> pkill -f "uvicorn backend.main:app", start again
+Port already in use            -> pkill -TERM -f '[u]vicorn backend.main:app', start again
 Something odd after code edit  -> restart the app, run tests (section 5)
 Lost track of changes          -> git status, git log --oneline -10
+
+----------------------------------------------------------------
+9. WHITEFILL (OFFLINE STL FOR PURE-WHITE SHAPES)
+----------------------------------------------------------------
+Open tool:
+  http://127.0.0.1:8000/whitefill
+
+Marker image (print at 100%; black square is 50 mm):
+  http://127.0.0.1:8000/api/v1/whitefill/marker
+
+API analyze endpoint:
+  curl -X POST -F "photos=@photo1.jpg" -F "photos=@photo2.jpg" -F "fill=white" http://127.0.0.1:8000/api/v1/whitefill/analyze
+
+Limits:
+  - up to 8 photos per scan
+  - each photo up to 10 MiB
+  - supports only pure-white cubes and triangles

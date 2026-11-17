@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.camera_stream import CameraStreamError, decode_jpeg_frame
 from backend.mesh_export import create_stepped_cornice
+from backend.whitefill_api import router as whitefill_router
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_MODEL_BYTES = 50 * 1024 * 1024
@@ -174,6 +175,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+app.include_router(whitefill_router)
 
 
 @app.get("/")

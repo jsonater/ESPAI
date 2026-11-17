@@ -3,6 +3,15 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.env
+.env.*
+!.env.example
+secrets/
+**/secrets/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
 
 # Keep image collections and generated model artifacts out of Git by default.
 data/
