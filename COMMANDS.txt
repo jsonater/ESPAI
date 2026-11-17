@@ -1,0 +1,132 @@
+ESPAI COMMANDS
+==============
+Run everything from the project folder unless noted:
+  cd ~/Documents/ESPAI
+
+----------------------------------------------------------------
+1. START / STOP / RESTART THE APP  (open http://127.0.0.1:8000/)
+----------------------------------------------------------------
+Start (keeps running even if the terminal closes):
+  cd ~/Documents/ESPAI && setsid nohup .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/espai.log 2>&1 < /dev/null &
+
+Start (simple, stops when you close the terminal / press Ctrl+C):
+  .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+Stop:
+  pkill -f "uvicorn backend.main:app"
+
+Restart (stop, wait, start):
+  pkill -f "uvicorn backend.main:app"; sleep 1; cd ~/Documents/ESPAI && setsid nohup .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/espai.log 2>&1 < /dev/null &
+
+Is it running? (should print {"status":"ok",...})
+  curl http://127.0.0.1:8000/api/health
+
+See the server log / errors:
+  tail -50 /tmp/espai.log
+  tail -f /tmp/espai.log          (live, Ctrl+C to leave)
+
+"Address already in use" error (something is on port 8000):
+  pkill -f "uvicorn backend.main:app"
+  ss -ltnp | grep 8000            (shows what is using the port)
+
+----------------------------------------------------------------
+2. CAMERA / CAR CHECKS
+----------------------------------------------------------------
+Connect laptop to the car Wi-Fi first: network "MyWiFiCar" (car = 192.168.4.1).
+
+Camera status from the app:
+  curl http://127.0.0.1:8000/api/v1/camera/status
+
+Is the car reachable?
+  ping -c 5 192.168.4.1
+
+Car's own page (close it when using the app; only ONE viewer at a time):
+  http://192.168.4.1/
+
+Save one live frame to a file:
+  curl -o frame.jpg http://127.0.0.1:8000/api/v1/camera/frame
+
+Camera frozen / not updating:
+  1. Close every other tab/phone viewing 192.168.4.1
+  2. Power-cycle the car (unplug battery/USB, wait 5 s, plug in)
+  3. Reconnect laptop to MyWiFiCar
+  4. Restart the app (section 1)
+
+Wi-Fi tools live on the host, not inside VS Code Flatpak. Prefix with flatpak-spawn --host:
+  flatpak-spawn --host nmcli device wifi list
+  flatpak-spawn --host nmcli connection show --active
+  flatpak-spawn --host ip addr
+
+----------------------------------------------------------------
+3. 3D MODEL / STL
+----------------------------------------------------------------
+Open the app -> "3D Reconstruction" -> "Open photo generator" -> make a GLB
+-> "Choose generated GLB" -> "Convert to STL" -> "Download STL".
+
+Convert a GLB to STL from the command line (API must be running):
+  curl -X POST -F "model=@model.glb" http://127.0.0.1:8000/api/v1/mesh/glb-to-stl -o model.stl
+
+Repair a broken STL (needs MeshLab):
+  sudo apt install meshlab
+  meshlab model.stl
+
+----------------------------------------------------------------
+4. AI ANALYSIS (Ollama)
+----------------------------------------------------------------
+Ollama runs on the host (not in VS Code Flatpak):
+  flatpak-spawn --host ollama list
+  flatpak-spawn --host ollama run qwen3-vl:2b
+  flatpak-spawn --host systemctl status ollama
+  flatpak-spawn --host sudo systemctl restart ollama
+
+App's view of Ollama:
+  curl http://127.0.0.1:8000/api/v1/ollama/status
+
+(CPU-only laptop: Ollama image analysis is slow and can time out.)
+
+----------------------------------------------------------------
+5. TESTS
+----------------------------------------------------------------
+Backend tests (expect "OK", 39 tests):
+  .venv/bin/python -m unittest discover -s backend/tests -v
+
+AI classifier tests:
+  .venv/bin/python -m unittest discover -s ai/tests -v
+
+----------------------------------------------------------------
+6. SETUP FROM SCRATCH (new computer / friend's computer)
+----------------------------------------------------------------
+  git clone https://github.com/jsonater/ESPAI.git
+  cd ESPAI
+  python3 -m venv .venv
+  .venv/bin/pip install -r backend/requirements.txt gradio_client
+  .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+Venv missing / broken imports:
+  rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt gradio_client
+
+----------------------------------------------------------------
+7. GITHUB
+----------------------------------------------------------------
+See what changed:
+  git status
+
+Save and upload everything:
+  git add -A && git commit -m "describe what you changed" && git push
+
+Download your friend's / latest changes:
+  git pull
+
+Undo uncommitted edits to ONE file (cannot be undone!):
+  git checkout -- path/to/file
+
+Never commit API keys. Keep them in a .env file (not uploaded).
+
+----------------------------------------------------------------
+8. QUICK FIX TABLE
+----------------------------------------------------------------
+127.0.0.1:8000 won't load      -> section 1: start the app, check /api/health
+Camera says stale / no frame   -> section 2: close other viewers, power-cycle car
+Port already in use            -> pkill -f "uvicorn backend.main:app", start again
+Something odd after code edit  -> restart the app, run tests (section 5)
+Lost track of changes          -> git status, git log --oneline -10
