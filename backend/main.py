@@ -33,7 +33,7 @@ from backend.mesh_export import create_stepped_cornice
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_MODEL_BYTES = 50 * 1024 * 1024
 CAMERA_FRAME_MAX_AGE_SECONDS = 2.0
-CAMERA_RECEIVE_TIMEOUT_SECONDS = 5.0
+CAMERA_RECEIVE_TIMEOUT_SECONDS = 3.0
 IMAGE_TYPES = {"image/jpeg", "image/png"}
 CAMERA_WEBSOCKET_URL = os.environ.get("ESP32_WEBSOCKET_URL", "ws://192.168.4.1/Camera")
 CAMERA_CAPTURE_URL = os.environ.get("ESP32_CAPTURE_URL", "http://192.168.4.1/capture")
