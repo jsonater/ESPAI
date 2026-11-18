@@ -4,8 +4,8 @@ Photos in, one printable STL per piece out, sized in millimetres. It runs fully 
 
 ## What it uses and what it ignores
 
-- **Used:** pure white only. Cubes and triangles are recognised and completed; in `complete` mode other white shapes get a best-guess outline.
-- **Ignored:** every other colour (cream, yellow, pink, grey, light blue), white mixed or speckled with another colour, other shapes (discs, blobs) unless in `complete` mode, pieces bigger than 120 mm or smaller than 5 mm, and pieces cut off by the photo edge.
+- **Used:** one piece colour per scan: white (default, strict untinted white) or yellow, red, orange, green, blue, pink (solid, saturated pieces on a plain background; the `colour` setting). Cubes and triangles are recognised and completed; in `complete` mode other shapes get a best-guess outline.
+- **Ignored:** pieces of other colours, pieces speckled or patterned with another colour, other shapes unless in `complete` mode, pieces bigger than 120 mm or smaller than 5 mm, and pieces cut off by the photo edge. A background of the same colour as the pieces (e.g. choosing blue on a blue table) is treated as too big and skipped.
 
 ## What the STL fills
 

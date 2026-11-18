@@ -19,3 +19,24 @@ def pure_white_mask(img: np.ndarray) -> np.ndarray:
     m = m.astype(np.uint8) * 255
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     return cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+
+
+# OpenCV hue is 0-179. Neutral greys and very pale tints fail the saturation test, so the table and shadows are ignored.
+COLOUR_HUES = {"red": [(0, 9), (175, 179)], "orange": [(10, 21)], "yellow": [(22, 34)],
+               "green": [(35, 84)], "blue": [(85, 129)], "pink": [(140, 174)]}
+PIECE_COLOURS = ("white", *COLOUR_HUES)
+
+
+def piece_colour_mask(img: np.ndarray, colour: str = "white") -> np.ndarray:
+    """255 where the pixel belongs to a piece of the chosen colour ("white" keeps the strict pure-white test)."""
+    if colour == "white":
+        return pure_white_mask(img)
+    if colour not in COLOUR_HUES:
+        raise ValueError(f"colour must be one of {PIECE_COLOURS}")
+    h, s, v = cv2.split(cv2.cvtColor(cv2.medianBlur(cv2.GaussianBlur(img, (5, 5), 0), 5), cv2.COLOR_BGR2HSV))
+    hue = np.zeros(h.shape, bool)
+    for lo, hi in COLOUR_HUES[colour]:
+        hue |= (h >= lo) & (h <= hi)
+    m = (hue & (s >= 30) & (v >= 60)).astype(np.uint8) * 255
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    return cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))

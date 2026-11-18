@@ -72,7 +72,7 @@ The backend now also exposes a local whitefill tool for classroom tests that do 
 - Upload or capture 1-8 photos
 - Click **Make STL** to generate one STL per detected piece
 
-This workflow targets pure-white pieces and ignores other colors. `fill=complete` restores broken cubes and triangles and gives other white shapes a best-guess outline; each broken piece also yields a fixed photo (missing parts painted in). Marker print and result downloads are available from:
+This workflow targets one piece colour per scan (white by default; `colour=yellow|red|orange|green|blue|pink` for solid coloured pieces). `fill=complete` restores broken cubes and triangles and gives other shapes a best-guess outline; each broken piece also yields a fixed photo (missing parts painted in). Marker print and result downloads are available from:
 
 - `GET /api/v1/whitefill/marker`
 - `POST /api/v1/whitefill/analyze`

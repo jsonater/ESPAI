@@ -36,7 +36,7 @@ def _missing_part(piece: dict, complete: np.ndarray, side_px: float, valid: np.n
 
 
 def detect(img: np.ndarray, valid: np.ndarray | None, px_per_mm: float | None, fill: str = "white",
-           min_mm: float = 5.0, max_mm: float = 120.0) -> dict:
+           min_mm: float = 5.0, max_mm: float = 120.0, colour: str = "white") -> dict:
     """Find pure-white cubes and triangles.
 
     fill="white":   the part fills exactly the pure-white area of each piece, nothing around it.
@@ -46,7 +46,7 @@ def detect(img: np.ndarray, valid: np.ndarray | None, px_per_mm: float | None, f
     """
     if fill not in FILL_MODES:
         raise ValueError(f"fill must be one of {FILL_MODES}")
-    pieces, skipped = find_pieces(img, valid, px_per_mm, min_mm, max_mm)
+    pieces, skipped = find_pieces(img, valid, px_per_mm, min_mm, max_mm, colour)
     target = np.zeros(img.shape[:2], np.uint8)
     shapes = []
     fixed = img.copy()

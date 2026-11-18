@@ -100,15 +100,22 @@ class ConceptMeshApiTests(unittest.TestCase):
         self.assertIn("Open photo generator", response.json()["reply"])
         self.assertIn("Choose a GLB file first", response.json()["reply"])
 
+    def test_rebel_guides_cover_server_and_ollama_problems(self):
+        server = api.rebel_help_guide("localhost shows 404 not found", "")
+        ollama = api.rebel_help_guide("the ollama model keeps timing out", "")
+        self.assertIn("flatpak-spawn --host pkill", server)
+        self.assertIn("ollama pull qwen2.5:1.5b", ollama)
+        self.assertIn("Open photo generator", api.rebel_help_guide("my 3d model will not convert", ""))
+
     def test_rebel_guides_match_whole_words_only(self):
-        self.assertIsNone(api.rebel_help_guide("How do I install Ollama?", ""))
+        self.assertIsNone(api.rebel_help_guide("How do I install the requirements?", ""))
         self.assertIsNone(api.rebel_help_guide("Why is my laptop slow?", ""))
         self.assertIn("Open photo generator", api.rebel_help_guide("my stl file is broken", ""))
 
     def test_rebel_whitefill_help_sets_scope_and_archive_help_is_accurate(self):
         whitefill = self.client.post("/api/v1/rebel/chat", json={"message": "Why can't Whitefill reconstruct a bookshelf?"})
         archive = self.client.post("/api/v1/rebel/chat", json={"message": "Where are my saved STL files?"})
-        self.assertIn("pure-white pieces only", whitefill.json()["reply"])
+        self.assertIn("one piece colour at a time", whitefill.json()["reply"])
         self.assertIn("not automatically saved", archive.json()["reply"])
 
     def test_rebel_chat_handles_unavailable_ollama_and_invalid_messages(self):

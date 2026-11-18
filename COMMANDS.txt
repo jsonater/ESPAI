@@ -143,12 +143,12 @@ Marker image (print at 100%; black square is 50 mm):
   http://127.0.0.1:8000/api/v1/whitefill/marker
 
 API analyze endpoint:
-  curl -X POST -F "photos=@photo1.jpg" -F "photos=@photo2.jpg" -F "fill=complete" http://127.0.0.1:8000/api/v1/whitefill/analyze
+  curl -X POST -F "photos=@photo1.jpg" -F "photos=@photo2.jpg" -F "fill=complete" -F "colour=white" http://127.0.0.1:8000/api/v1/whitefill/analyze
 
 Limits:
   - up to 8 photos per scan
   - each photo up to 10 MiB
-  - supports pure-white pieces only (fill=complete restores broken ones, guesses unclear shapes)
+  - one piece colour per scan: white, yellow, red, orange, green, blue or pink
   - also saves a fixed photo (missing parts painted in)
 
 Rebel (support chat) needs its small text model, one time:

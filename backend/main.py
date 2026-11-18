@@ -381,7 +381,7 @@ def rebel_help_guide(message: str, conversion_status: str) -> str | None:
 
     if mentions("whitefill", "white fill", "pure white", "cube", "triangle"):
         return (
-            "Whitefill works on pure-white pieces only; it is not a general object or bookshelf reconstructor. "
+            "Whitefill works on one piece colour at a time (white by default; pick another under Piece colour); it is not a general object or bookshelf reconstructor. "
             "Add a clear top-down photo, use the printed 50 mm marker for scale, pick 'whole piece' to restore broken parts "
             "(unclear shapes get a best-guess outline), and click Make STL. It also saves a fixed photo with the missing parts painted in. "
             "If no pieces are found, improve the lighting and use a contrasting background."
@@ -390,6 +390,19 @@ def rebel_help_guide(message: str, conversion_status: str) -> str | None:
         return (
             "Open Archive and click Refresh. It lists locally saved Whitefill STL files, measurement sheets and fixed photos. "
             "Hosted GLB/STL downloads are not automatically saved there."
+        )
+    if mentions("localhost", "127.0.0.1", "404", "not found", "server", "won't load", "wont load", "not loading", "port"):
+        return (
+            "If the page won't load or shows 404, the app server is stopped or an old copy is still running. "
+            "Stop old copies with: flatpak-spawn --host pkill -TERM -f '[u]vicorn backend.main:app', then start it with: "
+            "cd ~/Documents/ESPAI && setsid nohup .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log "
+            "> /tmp/espai.log 2>&1 < /dev/null &  Then open http://127.0.0.1:8000/ . COMMANDS.txt lists every command."
+        )
+    if mentions("ollama", "qwen", "timeout", "timed out", "timing out"):
+        return (
+            "Image analysis uses a local Ollama vision model and Rebel uses a small text model; both can be slow on this laptop. "
+            "Check Live camera shows 'Ready' for the Ollama model. To install the models run: flatpak-spawn --host ollama pull qwen3-vl:2b "
+            "and flatpak-spawn --host ollama pull qwen2.5:1.5b . If it times out, close other heavy programs and try again."
         )
     if mentions("camera", "stream", "frame", "esp32", "wifi", "wi-fi"):
         status = camera_status()

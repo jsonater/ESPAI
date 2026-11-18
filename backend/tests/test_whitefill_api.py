@@ -50,6 +50,12 @@ class WhitefillApiTests(unittest.TestCase):
 
         self.assertEqual(invalid_fill.status_code, 422)
         self.assertEqual(too_many.status_code, 413)
+        invalid_colour = self.client.post(
+            "/api/v1/whitefill/analyze",
+            files=[("photos", ("a.jpg", self.jpeg, "image/jpeg"))],
+            data={"colour": "purple"},
+        )
+        self.assertEqual(invalid_colour.status_code, 422)
 
     def test_whitefill_analyze_returns_files_url(self):
         fake_result = {

@@ -43,7 +43,7 @@ def _mad(values: list[float]) -> float:
 
 def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, mm_per_px: float = 0.5,
             fill: str = "white", clearance_mm: float | None = None, height_mm: float = 0.0,
-            min_piece_mm: float = 5.0, max_piece_mm: float = 120.0) -> dict:
+            min_piece_mm: float = 5.0, max_piece_mm: float = 120.0, colour: str = "white") -> dict:
     """Return a JSON-safe result dict; STL files and a measurement sheet are written to out_dir.
 
     height_mm 0 -> each part is as tall as its cube is wide (triangle: average side).
@@ -75,19 +75,19 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
     mm = 1.0 / px_per_mm
 
     # 2. detect in every photo, 3. vote
-    found = [detect(v, val, px_per_mm, fill, min_piece_mm, max_piece_mm) for v, val in zip(views, valids)]
+    found = [detect(v, val, px_per_mm, fill, min_piece_mm, max_piece_mm, colour) for v, val in zip(views, valids)]
     target = _vote([f["target"] for f in found], valids)
     target = cv2.morphologyEx(target, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     ref = max(range(len(views)), key=lambda i: (len(found[i]["shapes"]), _sharpness(views[i])))
     shapes, skipped = found[ref]["shapes"], found[ref]["skipped"]
     comps = _components(target)[:MAX_PARTS]
     ignored = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in skipped.items() if v) or "nothing"
-    base = {"fill": fill, "scale_source": scale_text, "mm_per_px": round(mm, 4), "marker_found": bool(corners),
+    base = {"fill": fill, "colour": colour, "scale_source": scale_text, "mm_per_px": round(mm, 4), "marker_found": bool(corners),
             "photos_measured": len(views), "photos_total": len(images), "skipped": skipped,
             "shapes_checked": len(shapes), "clearance_mm": clearance_mm}
     if not comps:
         return {**base, "ok": False,
-                "message": f"No pure-white cube or triangle to fill was found (ignored: {ignored})."}
+                "message": f"No {'pure-white' if colour == 'white' else colour} cube or triangle to fill was found (ignored: {ignored})."}
 
     # 4. one STL per piece
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -153,5 +153,5 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
     guess_note = f", {guessed} best-guess shape(s)" if guessed else ""
     return {**base, "ok": True, "parts": parts, "sheet": sheet_name, "fixed": fixed_name,
             "repaired_pieces": int(found[ref]["repaired"]), "guessed_pieces": guessed,
-            "description": f"{cubes} pure-white cube(s), {triangles} triangle(s){guess_note} {what}; "
+            "description": f"{cubes} {'pure-white' if colour == 'white' else colour} cube(s), {triangles} triangle(s){guess_note} {what}; "
                            f"{len(parts)} STL file(s) made; ignored: {ignored}."}

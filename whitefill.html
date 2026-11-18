@@ -83,7 +83,18 @@
     </section>
 
     <h2 style="margin-top:18px">2 · Settings</h2>
-    <div class="note">Only <b>pure white</b> pieces are used; other colours and mixed colours are ignored. Cubes and triangles are completed from their own edges. In "whole piece" mode other shapes get a <b>best-guess</b> outline (a smoothed hull of what is visible), so check those. This is a flat extrusion of the photo, not AI 3D reconstruction.</div>
+    <div class="note">Pieces of the chosen <b>colour</b> are used (white needs a pure, untinted white; other colours need a solid, saturated colour on a plain background). Mixed or speckled pieces are ignored. Cubes and triangles are completed from their own edges. In "whole piece" mode other shapes get a <b>best-guess</b> outline (a smoothed hull of what is visible), so check those. This is a flat extrusion of the photo, not AI 3D reconstruction.</div>
+    <label class="field">Piece colour
+      <select id="colour">
+        <option value="white" selected>White</option>
+        <option value="yellow">Yellow</option>
+        <option value="red">Red</option>
+        <option value="orange">Orange</option>
+        <option value="green">Green</option>
+        <option value="blue">Blue</option>
+        <option value="pink">Pink</option>
+      </select>
+    </label>
     <label class="field">What the STL fills
       <select id="fill">
         <option value="complete" selected>The whole piece, missing parts restored (guesses unclear shapes)</option>
@@ -369,8 +380,8 @@
   $('go').onclick = async () => {
     const form = new FormData();
     photos.forEach((blob, i) => form.append('photos', blob, `photo${i}.jpg`));
-    ['fill', 'marker_mm', 'mm_per_px', 'height_mm', 'clearance_mm', 'max_piece_mm', 'min_piece_mm'].forEach(k => form.append(k, $(k).value));
-    $('go').disabled = true; setStatus('<span class="spin"></span>Finding the pure white and measuring it…');
+    ['fill', 'colour', 'marker_mm', 'mm_per_px', 'height_mm', 'clearance_mm', 'max_piece_mm', 'min_piece_mm'].forEach(k => form.append(k, $(k).value));
+    $('go').disabled = true; setStatus('<span class="spin"></span>Finding the pieces and measuring them…');
     try {
       const response = await fetch('/api/v1/whitefill/analyze', { method: 'POST', body: form });
       const result = await response.json();

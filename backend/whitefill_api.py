@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from backend.whitefill import analyze
+from backend.whitefill.colors import PIECE_COLOURS
 from backend.whitefill.detect import FILL_MODES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +83,7 @@ def whitefill_scans() -> dict:
 async def whitefill_analyze(
     photos: list[UploadFile] = File(...),
     fill: str = Form("white"),
+    colour: str = Form("white"),
     marker_mm: float = Form(50.0),
     mm_per_px: float = Form(0.5),
     clearance_mm: float = Form(-1.0),
@@ -91,6 +93,8 @@ async def whitefill_analyze(
 ) -> dict:
     if fill not in FILL_MODES:
         raise HTTPException(status_code=422, detail=f"fill must be one of {', '.join(FILL_MODES)}")
+    if colour not in PIECE_COLOURS:
+        raise HTTPException(status_code=422, detail=f"colour must be one of {', '.join(PIECE_COLOURS)}")
     if len(photos) > MAX_PHOTOS:
         raise HTTPException(status_code=413, detail=f"Send at most {MAX_PHOTOS} photos")
     if not (0 <= marker_mm <= 500 and 0 < mm_per_px <= 50 and 0 <= height_mm <= 500
@@ -113,7 +117,7 @@ async def whitefill_analyze(
     result = await run_in_threadpool(
         analyze, images, str(scan), marker_mm=marker_mm, mm_per_px=mm_per_px, fill=fill,
         clearance_mm=None if clearance_mm < 0 else clearance_mm, height_mm=height_mm,
-        min_piece_mm=min_piece_mm, max_piece_mm=max_piece_mm)
+        min_piece_mm=min_piece_mm, max_piece_mm=max_piece_mm, colour=colour)
     result["files_url"] = f"/api/v1/whitefill/files/{scan.parent.name}/{scan.name}"
     return result
 

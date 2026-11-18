@@ -9,15 +9,17 @@ import trimesh
 from backend.whitefill import analyze
 
 BLUE, WHITE = (170, 92, 30), (236, 239, 240)
+YELLOW = (40, 215, 245)
+GREY_TABLE = (150, 150, 150)
 
 
-def chipped_cube_scene():
-    scene = np.full((400, 600, 3), BLUE, np.uint8)
+def chipped_cube_scene(colour=WHITE, background=BLUE):
+    scene = np.full((400, 600, 3), background, np.uint8)
     cube = np.zeros(scene.shape[:2], np.uint8)
     cv2.rectangle(cube, (100, 100), (260, 260), 255, -1)
     chip = np.zeros_like(cube)
     cv2.fillPoly(chip, [np.array([[200, 100], [260, 100], [260, 160]])], 255)
-    scene[(cube > 0) & (chip == 0)] = WHITE
+    scene[(cube > 0) & (chip == 0)] = colour
     return cv2.GaussianBlur(scene, (0, 0), 1.0)
 
 
@@ -45,6 +47,24 @@ class FixedPhotoTests(unittest.TestCase):
             result = analyze([scene], folder, marker_mm=0, mm_per_px=0.5)
         self.assertTrue(result["ok"])
         self.assertIsNone(result["fixed"])
+
+    def test_colour_mode_restores_a_chipped_yellow_cube(self):
+        scene = chipped_cube_scene(YELLOW, GREY_TABLE)
+        with tempfile.TemporaryDirectory() as folder:
+            ignored = analyze([scene], folder + "/white", marker_mm=0, mm_per_px=0.5, fill="complete")
+            yellow = analyze([scene], folder + "/yellow", marker_mm=0, mm_per_px=0.5, fill="complete", colour="yellow")
+            fixed = cv2.imread(str(Path(folder) / "yellow" / yellow["fixed"]))
+
+        self.assertFalse(ignored["ok"])
+        self.assertTrue(yellow["ok"])
+        self.assertEqual(yellow["colour"], "yellow")
+        full_cm2 = 160 * 160 * 0.25 / 100
+        self.assertAlmostEqual(yellow["parts"][0]["area_cm2"], full_cm2, delta=0.05 * full_cm2)
+        self.assertLess(np.abs(fixed[125, 245].astype(int) - np.array(YELLOW)).max(), 30)
+
+    def test_unknown_colour_is_rejected(self):
+        with self.assertRaises(ValueError):
+            analyze([chipped_cube_scene()], tempfile.gettempdir() + "/espai-bad-colour", marker_mm=0, colour="purple")
 
     def test_complete_mode_restores_the_whole_chipped_cube(self):
         scene = chipped_cube_scene()
