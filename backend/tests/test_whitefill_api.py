@@ -87,6 +87,17 @@ class WhitefillApiTests(unittest.TestCase):
         self.assertEqual(file_ok.headers["content-type"], "model/stl")
         self.assertEqual(file_bad.status_code, 404)
 
+    def test_scans_lists_only_saved_whitefill_results(self):
+        scan = self.root / "batch_0001" / "scan_20261117_101010_01"
+        scan.mkdir(parents=True)
+        (scan / "part_01.stl").write_bytes(b"stl")
+        (scan / "sheet.jpg").write_bytes(b"jpg")
+        (scan / "private.txt").write_text("not a result")
+        response = self.client.get("/api/v1/whitefill/scans")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"scans": [{"batch": "batch_0001", "scan": scan.name,
+                                                        "files": ["part_01.stl", "sheet.jpg"]}]})
+
     def test_new_scan_folder_starts_new_batch_after_twenty(self):
         scans = [whitefill_api.new_scan_folder(self.root) for _ in range(45)]
         self.assertEqual(len({path for path in scans}), 45)

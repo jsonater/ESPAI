@@ -74,6 +74,29 @@ class ConceptMeshApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_rebel_chat_sends_message_and_safe_diagnostics_to_ollama(self):
+        response_mock = unittest.mock.MagicMock()
+        response_mock.__enter__.return_value = response_mock
+        response_mock.read.return_value = json.dumps({"response": "Check the car Wi-Fi."}).encode()
+        with patch.object(api, "REBEL_MODEL", "support-test-model"), patch("backend.main.urlopen", return_value=response_mock) as request_mock:
+            response = self.client.post("/api/v1/rebel/chat", json={"message": "Camera stopped"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reply"], "Check the car Wi-Fi.")
+        payload = json.loads(request_mock.call_args.args[0].data)
+        self.assertEqual(payload["model"], "support-test-model")
+        self.assertEqual(response.json()["model"], "support-test-model")
+        self.assertEqual(json.loads(payload["prompt"])["question"], "Camera stopped")
+        self.assertIn("camera_state", payload["system"])
+        self.assertNotIn("ROBOFLOW_API_KEY", payload["system"])
+
+    def test_rebel_chat_handles_unavailable_ollama_and_invalid_messages(self):
+        self.assertEqual(self.client.post("/api/v1/rebel/chat", json={"message": " "}).status_code, 422)
+        self.assertEqual(self.client.post("/api/v1/rebel/chat", json={"message": "x" * 4001}).status_code, 422)
+        with patch("backend.main.urlopen", side_effect=OSError("offline")):
+            response = self.client.post("/api/v1/rebel/chat", json={"message": "Help"})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Ollama", response.json()["detail"])
+
     def test_root_serves_local_dashboard(self):
         response = self.client.get("/")
 

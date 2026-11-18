@@ -13,6 +13,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.error import URLError
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -25,6 +26,7 @@ from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from backend.camera_stream import CameraStreamError, decode_jpeg_frame
@@ -43,6 +45,7 @@ ROBOFLOW_MODEL_ID = os.environ.get("ROBOFLOW_MODEL_ID")
 ROBOFLOW_API_URL = os.environ.get("ROBOFLOW_API_URL", "https://serverless.roboflow.com")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3-vl:2b")
+REBEL_MODEL = os.environ.get("REBEL_MODEL", "qwen2.5:1.5b")
 OLLAMA_TIMEOUT_SECONDS = 180
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_PHOTO_DIR = Path.home() / "Desktop" / "ESP car photos"
@@ -356,6 +359,89 @@ def ollama_status() -> dict[str, str | bool | None]:
         "runtime": "local",
         "message": "Ready" if installed else f"Install the model with: ollama pull {OLLAMA_MODEL}",
     }
+
+
+class RebelMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class RebelRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[RebelMessage] = Field(default_factory=list, max_length=8)
+    conversion_status: str = Field(default="Unknown", max_length=500)
+
+
+def run_rebel_chat(message: str, history: list[RebelMessage], conversion_status: str) -> str:
+    camera = camera_status()
+    context = {
+        "camera_state": camera["state"],
+        "camera_fps": camera["fps"],
+        "camera_frames_received": camera["frames_received"],
+        "roboflow_configured": roboflow_status()["configured"],
+        "conversion_status": conversion_status,
+    }
+    request = Request(
+        f"{OLLAMA_BASE_URL}/api/generate",
+        data=json.dumps({
+            "model": REBEL_MODEL,
+            "system": (
+                "You are Rebel, the ESPAI app troubleshooting assistant. Give concise, practical steps. "
+                "ESPAI has a camera view for an ESP32-CAM at MyWiFiCar, local Ollama image analysis, "
+                "a hosted Stable Fast 3D generator with local GLB to STL conversion, and /whitefill, "
+                "an offline tool for white cubes and triangles. Models do not guarantee accurate repairs. "
+                "For conversion, choose a downloaded GLB in Reconstruction, select Convert to STL, "
+                "then Download STL. Ask for the exact error; GLB is binary, not a text file. "
+                "You have only the diagnostic snapshot below; you cannot inspect files, press buttons, "
+                "run commands, or make changes. Never claim to have done so. Ask for details when needed. "
+                "Do not invent features or request passwords or API keys. Limit your answer to three short steps. "
+                "Diagnostic snapshot: " + json.dumps(context)
+            ),
+            "prompt": json.dumps({"recent_conversation": [item.model_dump() for item in history], "question": message}),
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0.2, "num_predict": 384},
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
+            body = response.read(1024 * 1024 + 1)
+    except TimeoutError as error:
+        raise OllamaTimeoutError("Rebel timed out waiting for Ollama. Try a faster local text model with REBEL_MODEL.") from error
+    except HTTPError as error:
+        if error.code == 404:
+            raise OllamaInferenceError(f"Rebel model is not installed. Run: ollama pull {REBEL_MODEL}") from error
+        raise OllamaInferenceError(f"Ollama returned HTTP {error.code}; check the configured model") from error
+    except (URLError, OSError) as error:
+        raise OllamaUnavailableError("Could not reach Ollama") from error
+    if len(body) > 1024 * 1024:
+        raise OllamaInferenceError("Ollama response exceeded the 1 MiB limit")
+    try:
+        payload = json.loads(body)
+        reply = payload.get("response") if isinstance(payload, dict) else None
+        if not isinstance(reply, str) or not reply.strip():
+            raise ValueError("empty response")
+    except (ValueError, TypeError) as error:
+        raise OllamaInferenceError("Ollama returned an invalid or empty response") from error
+    return reply.strip()
+
+
+@app.post("/api/v1/rebel/chat")
+async def rebel_chat(request: RebelRequest) -> dict[str, str]:
+    message = request.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="Enter a message for Rebel")
+    try:
+        reply = await run_in_threadpool(run_rebel_chat, message, request.history, request.conversion_status)
+    except OllamaTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except OllamaUnavailableError as error:
+        raise HTTPException(status_code=503, detail=f"{error}. Start Ollama and install {REBEL_MODEL}.") from error
+    except OllamaInferenceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return {"reply": reply, "model": REBEL_MODEL}
 
 
 def run_ollama_inference(image_bytes: bytes) -> dict:

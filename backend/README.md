@@ -78,6 +78,12 @@ This workflow targets only pure-white cubes and triangles and ignores other colo
 - `POST /api/v1/whitefill/analyze`
 - `GET /api/v1/whitefill/files/{batch}/{scan}/{name}`
 
+## Rebel support and Archive
+
+The dashboard's Rebel view sends support questions and a limited diagnostic snapshot to the configured Ollama service. Rebel suggests steps, but can make mistakes; it cannot inspect or edit source files, click controls, or run commands. Conversation history stays in the browser until the page is reloaded. Avoid sending secrets. Install the default support model once with `ollama pull qwen2.5:1.5b` (on VS Code Flatpak, use `flatpak-spawn --host ollama pull qwen2.5:1.5b`). `REBEL_MODEL` can select another installed Ollama text model independently of the image-analysis `OLLAMA_MODEL`. CPU inference can be slow or time out.
+
+Archive lists locally saved Whitefill STL files and measurement sheets. Hosted generator downloads and converted GLBs are not automatically archived.
+
 ## Tests
 
 ```sh

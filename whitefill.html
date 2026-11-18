@@ -124,6 +124,7 @@
   $('cams').onchange = () => startCamera($('cams').value);
 
   function addPhoto(blob) {
+    if (!blob || !blob.size) { setStatus('Could not read the photo. Try capturing it again.', true); return; }
     if (photos.length >= MAX_PHOTOS) { setStatus(`At most ${MAX_PHOTOS} photos per scan.`, true); return; }
     photos.push(blob); renderThumbs();
   }
@@ -146,8 +147,11 @@
   $('carFrame').onclick = async () => {
     try {
       const response = await fetch('/api/v1/camera/frame', { cache: 'no-store' });
-      if (!response.ok) throw new Error();
-      addPhoto(await response.blob());
+      if (!response.ok || response.status === 204) throw new Error();
+      const photo = await response.blob();
+      if (!photo.size || !photo.type.startsWith('image/')) throw new Error();
+      addPhoto(photo);
+      if (photos.includes(photo)) setStatus('Car camera frame added.', false);
     } catch (error) { setStatus('No car camera frame available. Connect to the car Wi-Fi and start the full app.', true); }
   };
   $('files').onchange = e => { [...e.target.files].forEach(addPhoto); e.target.value = ''; };

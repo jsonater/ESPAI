@@ -190,6 +190,14 @@
     .live-note { padding: 11px 12px; border: 1px solid #eadbcf; background: #f7f0e9; color: #79614d; border-radius: 4px; font-size: 9px; line-height: 1.5; }
     .live-note strong { color: #614a38; }
     .mesh-generator-frame { display: block; width: 100%; height: min(82vh, 900px); min-height: 650px; border: 0; background: #fff; }
+    .rebel-chat { max-width: 800px; display: grid; gap: 14px; }
+    .rebel-messages { min-height: 240px; max-height: 52vh; overflow-y: auto; padding: 18px; display: grid; align-content: start; gap: 12px; }
+    .rebel-message { max-width: 90%; padding: 10px 12px; border-radius: 5px; background: #edf2eb; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .rebel-message.user { justify-self: end; background: #f3e5de; }
+    .rebel-message strong { display: block; margin-bottom: 4px; font-size: 11px; }
+    .rebel-form { padding: 14px; display: flex; align-items: flex-end; gap: 10px; }
+    .rebel-form textarea { flex: 1; min-width: 0; min-height: 72px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+    .rebel-status { margin: 0; color: var(--muted); font-size: 11px; }
     .spin { animation: spin 1.1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 720px) {
@@ -210,7 +218,7 @@
       .app { grid-template-columns: minmax(0, 1fr); }
       .sidebar { padding: 8px 10px; align-items: stretch; gap: 0; border-right: 0; border-bottom: 1px solid var(--line); }
       .sidebar > .brand, .sidebar > .side-bottom { display: none; }
-      .nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
       .nav button { flex-direction: column; gap: 4px; padding: 8px 2px; text-align: center; font-size: 10px; }
       .nav button span { display: block; overflow-wrap: anywhere; }
     }
@@ -229,7 +237,8 @@
           <button class="active" type="button" aria-label="Dataset" data-view="dataset"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg><span>Dataset</span></button>
           <button type="button" aria-label="Live camera" data-view="live"><svg viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3v12H4zM12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/></svg><span>Live camera</span></button>
           <button type="button" aria-label="Reconstruction" data-view="reconstruction"><svg viewBox="0 0 24 24"><path d="M4 17 9 7l4 6 3-4 4 8H4zM7 19h10"/></svg><span>Reconstruction</span></button>
-          <button type="button" aria-label="Archive"><svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zM6 9v10h12V9M9 13h6"/></svg><span>Archive</span></button>
+          <button type="button" aria-label="Rebel support" data-view="rebel"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5zM8 9h8M8 12h5"/></svg><span>Rebel</span></button>
+          <button type="button" aria-label="Archive" data-view="archive"><svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zM6 9v10h12V9M9 13h6"/></svg><span>Archive</span></button>
         </nav>
       </div>
       <div class="side-project">
@@ -277,6 +286,18 @@
               <button class="dataset-button primary" id="saveSamplesForm" type="submit" disabled>Save selected images</button>
               <p class="label-help">Stored only in this browser on this device. Export a dataset bundle for backup. These are image-level labels; pixel-by-pixel damage masks are not included.</p>
             </form>
+          </div>
+        </section>
+        <section id="archiveView" aria-label="Archive" hidden>
+          <div class="page-heading"><div><div class="eyebrow">Saved locally</div><h1>Archive</h1><p class="subtitle">Whitefill scans and downloads</p></div><button class="dataset-button" id="refreshArchive" type="button">Refresh</button></div>
+          <div id="archiveResults" class="rebel-chat" aria-live="polite"></div>
+        </section>
+        <section id="rebelView" aria-label="Rebel support" hidden>
+          <div class="page-heading"><div><div class="eyebrow">Support</div><h1>Rebel</h1><p class="subtitle">Local troubleshooting assistant</p></div></div>
+          <div class="rebel-chat">
+            <div class="panel rebel-messages" id="rebelMessages" aria-live="polite"><div class="rebel-message"><strong>Rebel</strong>What problem are you having?</div></div>
+            <form class="panel rebel-form" id="rebelForm"><textarea id="rebelInput" maxlength="4000" aria-label="Message Rebel" placeholder="Describe the problem" required></textarea><button class="dataset-button primary" id="rebelSend" type="submit">Send</button></form>
+            <p class="rebel-status" id="rebelStatus" role="status">Rebel can suggest fixes but may make mistakes; it cannot change the app.</p>
           </div>
         </section>
         <section id="liveView" aria-label="Live camera monitor" hidden>
@@ -1120,6 +1141,75 @@
       cameraPlaceholder.hidden = false;
       cameraFeed.hidden = true;
     });
+    async function refreshArchive() {
+      const container = document.getElementById('archiveResults');
+      container.textContent = 'Loading saved scans...';
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/whitefill/scans`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Could not load saved scans.');
+        const result = await response.json();
+        container.replaceChildren();
+        if (!result.scans.length) { container.textContent = 'No saved Whitefill scans yet.'; return; }
+        result.scans.forEach(scan => {
+          const item = document.createElement('section');
+          item.className = 'panel label-panel';
+          const title = document.createElement('h2');
+          title.textContent = scan.scan;
+          const links = document.createElement('div');
+          links.className = 'live-controls';
+          scan.files.forEach(file => {
+            const link = document.createElement('a');
+            link.className = 'dataset-button';
+            link.textContent = file;
+            link.href = `${cameraApiBase}/api/v1/whitefill/files/${encodeURIComponent(scan.batch)}/${encodeURIComponent(scan.scan)}/${encodeURIComponent(file)}?download=true`;
+            links.appendChild(link);
+          });
+          item.append(title, links);
+          container.appendChild(item);
+        });
+      } catch (error) { container.textContent = error.message || 'Could not load saved scans.'; }
+    }
+    document.getElementById('refreshArchive').addEventListener('click', refreshArchive);
+    const rebelHistory = [];
+    const rebelForm = document.getElementById('rebelForm');
+    const rebelInput = document.getElementById('rebelInput');
+    const rebelSend = document.getElementById('rebelSend');
+    const rebelMessages = document.getElementById('rebelMessages');
+    const rebelStatus = document.getElementById('rebelStatus');
+    function addRebelMessage(role, text) {
+      const message = document.createElement('div');
+      message.className = `rebel-message ${role}`;
+      const name = document.createElement('strong');
+      name.textContent = role === 'user' ? 'You' : 'Rebel';
+      message.append(name, document.createTextNode(text));
+      rebelMessages.appendChild(message);
+      rebelMessages.scrollTop = rebelMessages.scrollHeight;
+    }
+    rebelForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const text = rebelInput.value.trim();
+      if (!text) return;
+      rebelSend.disabled = true;
+      rebelStatus.textContent = 'Rebel is thinking...';
+      addRebelMessage('user', text);
+      rebelInput.value = '';
+      try {
+        const response = await fetch(`${cameraApiBase}/api/v1/rebel/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, history: rebelHistory.slice(-8), conversion_status: document.getElementById('meshConversionStatus').textContent.slice(0, 500) })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Rebel could not answer.');
+        addRebelMessage('assistant', result.reply);
+        rebelHistory.push({ role: 'user', content: text }, { role: 'assistant', content: result.reply.slice(0, 4000) });
+        rebelStatus.textContent = 'Rebel can suggest fixes but may make mistakes; it cannot change the app.';
+      } catch (error) {
+        rebelStatus.textContent = error.message || 'Could not reach Rebel. Is the app running?';
+        rebelInput.value = text;
+      } finally {
+        rebelSend.disabled = false;
+      }
+    });
     document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => {
       document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active'));
       button.classList.add('active');
@@ -1128,7 +1218,10 @@
         document.getElementById('datasetView').hidden = view !== 'dataset';
         document.getElementById('liveView').hidden = view !== 'live';
         document.getElementById('reconstructionView').hidden = view !== 'reconstruction';
-        document.getElementById('currentViewName').textContent = view === 'dataset' ? 'Training images' : view === 'live' ? 'Live camera' : 'South facade';
+        document.getElementById('rebelView').hidden = view !== 'rebel';
+        document.getElementById('archiveView').hidden = view !== 'archive';
+        document.getElementById('currentViewName').textContent = view === 'dataset' ? 'Training images' : view === 'live' ? 'Live camera' : view === 'rebel' ? 'Rebel support' : view === 'archive' ? 'Archive' : 'Reconstruction';
+        if (view === 'archive') refreshArchive();
         if (view === 'live') {
           refreshCameraStatus();
           refreshRoboflowStatus();

@@ -59,6 +59,25 @@ def whitefill_marker() -> FileResponse:
     return FileResponse(MARKER_FILE, media_type="image/png", filename="marker_50mm.png")
 
 
+@router.get("/api/v1/whitefill/scans")
+def whitefill_scans() -> dict:
+    scans = []
+    if not OUTPUT_ROOT.is_dir():
+        return {"scans": scans}
+    for batch in sorted(OUTPUT_ROOT.iterdir(), reverse=True):
+        if batch.is_symlink() or not batch.is_dir() or not re.fullmatch(r"batch_\d+", batch.name):
+            continue
+        for scan in sorted(batch.iterdir(), reverse=True):
+            if scan.is_symlink() or not scan.is_dir() or not re.fullmatch(r"scan_\d{8}_\d{6}_\d+", scan.name):
+                continue
+            files = [file.name for file in sorted(scan.iterdir())
+                     if not file.is_symlink() and file.is_file() and SAFE_NAME.fullmatch(file.name)
+                     and file.suffix in {".stl", ".jpg"}]
+            if files:
+                scans.append({"batch": batch.name, "scan": scan.name, "files": files})
+    return {"scans": scans}
+
+
 @router.post("/api/v1/whitefill/analyze")
 async def whitefill_analyze(
     photos: list[UploadFile] = File(...),
