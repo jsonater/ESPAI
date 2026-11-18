@@ -40,7 +40,7 @@ The backend checks `GET /api/v1/ollama/status` and sends one selected frame to `
 
 The **Reconstruction** view embeds Stability AI's hosted [Stable Fast 3D](https://stabilityai-stable-fast-3d.hf.space/) generator in the app, so you do not need to switch to a separate app tab for the normal flow. This is separate from Ollama and requires internet. Upload a JPEG/PNG inside the embedded generator, choose **Remove Background** when offered, then choose **Run** and download the GLB result. In the same Reconstruction view, choose that `.glb` file, select **Convert to STL**, and then click **Download STL**. The conversion runs locally through `POST /api/v1/mesh/glb-to-stl`; uploads are limited to 50 MiB. If the hosted frame stalls, use **Open photo generator** and return to the same Reconstruction view to convert the downloaded GLB.
 
-The photo is sent to Hugging Face/Stability AI only when you choose and upload it on their hosted page. The current Stability AI Community License permits research and non-commercial use; commercial use has additional terms. The app displays the required Stable Fast 3D attribution. A single-view model is a plausible 3D concept, not a reconstruction of hidden geometry, a historically verified repair, or a model with measured real-world scale. The converter scales GLB meters to STL millimeters, but the model's actual scale is still a guess and should be measured before fabrication. The separate `/api/v1/concept-mesh` endpoint still creates only a fixed stepped-cornice placeholder from supplied dimensions.
+The photo is sent to Hugging Face/Stability AI only when you choose and upload it on their hosted page. The current Stability AI Community License permits research and non-commercial use; commercial use has additional terms. The app displays the required Stable Fast 3D attribution. A single-view model is a plausible 3D concept; hidden geometry, restoration, and generated color are model estimates, not verified facts. Keep the original GLB to retain any embedded color/materials. STL stores geometry only and does not preserve color. The converter scales GLB meters to STL millimeters, but the model's actual scale is still a guess and should be measured before fabrication. The separate `/api/v1/concept-mesh` endpoint still creates only a fixed stepped-cornice placeholder from supplied dimensions.
 
 Roboflow Serverless Cloud inference is one frame per explicit button press, not automatic per-frame polling, and requires internet. Create or train a model in Roboflow, then configure its model ID (`project/version`) and API key in the server process environment when internet is available:
 
@@ -72,17 +72,18 @@ The backend now also exposes a local whitefill tool for classroom tests that do 
 - Upload or capture 1-8 photos
 - Click **Make STL** to generate one STL per detected piece
 
-This workflow targets only pure-white cubes and triangles and ignores other colors and shapes. Marker print and result downloads are available from:
+This workflow targets pure-white pieces and ignores other colors. `fill=complete` restores broken cubes and triangles and gives other white shapes a best-guess outline; each broken piece also yields a fixed photo (missing parts painted in). Marker print and result downloads are available from:
 
 - `GET /api/v1/whitefill/marker`
 - `POST /api/v1/whitefill/analyze`
 - `GET /api/v1/whitefill/files/{batch}/{scan}/{name}`
+- `GET /api/v1/whitefill/scans` (lists saved results)
 
 ## Rebel support and Archive
 
 The dashboard's Rebel view sends support questions and a limited diagnostic snapshot to the configured Ollama service. Rebel suggests steps, but can make mistakes; it cannot inspect or edit source files, click controls, or run commands. Conversation history stays in the browser until the page is reloaded. Avoid sending secrets. Install the default support model once with `ollama pull qwen2.5:1.5b` (on VS Code Flatpak, use `flatpak-spawn --host ollama pull qwen2.5:1.5b`). `REBEL_MODEL` can select another installed Ollama text model independently of the image-analysis `OLLAMA_MODEL`. CPU inference can be slow or time out.
 
-Archive lists locally saved Whitefill STL files and measurement sheets. Hosted generator downloads and converted GLBs are not automatically archived.
+Archive lists locally saved Whitefill STL files, measurement sheets and fixed photos. Hosted generator downloads and converted GLBs are not automatically archived.
 
 ## Tests
 

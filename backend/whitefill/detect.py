@@ -8,7 +8,7 @@ import numpy as np
 from .pieces import find_pieces
 from .shapes import classify_piece
 
-FILL_MODES = ("white", "missing")
+FILL_MODES = ("white", "missing", "complete")
 
 
 def _ellipse(k: int) -> np.ndarray:
@@ -41,20 +41,53 @@ def detect(img: np.ndarray, valid: np.ndarray | None, px_per_mm: float | None, f
 
     fill="white":   the part fills exactly the pure-white area of each piece, nothing around it.
     fill="missing": the part is what is missing from each piece's full cube/triangle outline.
+    fill="complete": the whole piece with its missing parts restored; unclear shapes get a best-guess
+                     (convex) outline instead of being skipped.
     """
     if fill not in FILL_MODES:
         raise ValueError(f"fill must be one of {FILL_MODES}")
     pieces, skipped = find_pieces(img, valid, px_per_mm, min_mm, max_mm)
     target = np.zeros(img.shape[:2], np.uint8)
     shapes = []
+    fixed = img.copy()
+    repaired = 0
+    guessed = 0
     for piece in pieces:
         cls = classify_piece(piece, img.shape[:2])
         if cls is None:
-            skipped["other_shape"] += 1
+            if fill != "complete":
+                skipped["other_shape"] += 1
+                continue
+            hull = cv2.convexHull(piece["cnt"])
+            guess = np.zeros(img.shape[:2], np.uint8)
+            cv2.fillPoly(guess, [hull], 255)
+            if valid is not None:
+                guess = cv2.bitwise_and(guess, valid)
+            (_, _), (rw, rh), _ = cv2.minAreaRect(hull)
+            target |= guess
+            guessed += 1
+            shapes.append({"kind": "piece", "poly": hull.reshape(-1, 2).astype(float).tolist(),
+                           "side_px": float(np.sqrt(cv2.contourArea(hull))), "sides_px": [float(rw), float(rh)],
+                           "has_part": True, "guessed": True})
             continue
         kind, _, complete, poly, side_px, sides, _ = cls
-        part = piece["mask"] if fill == "white" else _missing_part(piece, complete, side_px, valid)
+        gap = _missing_part(piece, complete, side_px, valid)
+        if fill == "white":
+            part = piece["mask"]
+        elif fill == "missing":
+            part = gap
+        else:
+            part = cv2.bitwise_or(piece["mask"], gap)
         target |= part
+        if gap.any():
+            # Paint the missing area with the piece's own median colour, feathered into the photo.
+            colour = np.median(img[piece["mask"] > 0], axis=0)
+            paint = cv2.dilate(gap, _ellipse(2)) & complete   # also covers the blurred old break edge
+            alpha = cv2.GaussianBlur(paint.astype(np.float32) / 255.0, (0, 0), 1.0)[..., None]
+            blended = np.rint(fixed * (1 - alpha) + colour * alpha).astype(np.uint8)
+            fixed = np.where(alpha > 0.004, blended, fixed)
+            repaired += 1
         shapes.append({"kind": kind, "poly": np.asarray(poly, float).tolist(), "side_px": float(side_px),
                        "sides_px": [float(v) for v in sides], "has_part": bool(part.any())})
-    return {"target": target, "shapes": shapes, "skipped": skipped}
+    return {"target": target, "shapes": shapes, "skipped": skipped, "fixed": fixed, "repaired": repaired,
+            "guessed": guessed}

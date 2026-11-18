@@ -30,9 +30,14 @@
   #drop { border: 2px dashed var(--line); border-radius: 8px; padding: 12px; text-align: center; color: var(--muted); margin-top: 10px; }
   #drop.over { border-color: var(--green); color: var(--green-dark); }
   #thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .thumb { position: relative; }
-  .thumb img { width: 92px; height: 69px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
-  .thumb button { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; padding: 0; border-radius: 50%; background: var(--clay); border-color: var(--clay); color: #fff; line-height: 1; }
+  .thumb { display: grid; align-content: start; gap: 5px; width: 142px; padding: 5px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .thumb img { width: 100%; height: 88px; object-fit: cover; border-radius: 4px; display: block; }
+  .thumb-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  .thumb-actions button { padding: 5px 7px; font-size: 11px; }
+  .thumb-actions .remove-photo { color: #fff; background: var(--clay); border-color: var(--clay); }
+  #focusEditor { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  #focusCanvas { display: block; max-width: 100%; max-height: 420px; width: auto; height: auto; margin: 0 auto; background: #202923; touch-action: none; cursor: crosshair; }
+  #focusStatus { min-height: 20px; margin: 8px 0 0; color: var(--muted); font-size: 12px; }
   label.field { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 8px 0; color: #4f5a53; }
   .note { background: var(--green-pale); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
   #status { min-height: 22px; margin-top: 10px; }
@@ -69,12 +74,20 @@
       <label class="btn">Choose files<input id="files" type="file" accept="image/jpeg,image/png" multiple hidden></label>
     </div>
     <div id="thumbs"></div>
+    <section id="focusEditor" aria-label="Focus Whitefill on one photo region" hidden>
+      <h2>Focus on selected pieces</h2>
+      <p class="note">Drag a separate box around each target piece. Whitefill uses pixels inside the boxes and masks the rest, so include the whole piece with a little background. If you use the printed marker for true scale, select the whole marker too. Crop matching areas in each view you want to combine.</p>
+      <canvas id="focusCanvas" aria-label="Drag to select the piece Whitefill should analyze"></canvas>
+      <div class="row"><button id="applyFocusCrop" class="primary" type="button" disabled>Use focused photo</button><button id="undoFocusSelection" type="button" disabled>Undo last</button><button id="cancelFocusCrop" type="button">Cancel</button></div>
+      <p id="focusStatus" role="status">Drag around each piece you want Whitefill to prioritize.</p>
+    </section>
 
     <h2 style="margin-top:18px">2 · Settings</h2>
-    <div class="note">Only <b>pure white</b> cubes and triangles are used. Other colours, mixed colours, other shapes and big objects are ignored.</div>
+    <div class="note">Only <b>pure white</b> pieces are used; other colours and mixed colours are ignored. Cubes and triangles are completed from their own edges. In "whole piece" mode other shapes get a <b>best-guess</b> outline (a smoothed hull of what is visible), so check those. This is a flat extrusion of the photo, not AI 3D reconstruction.</div>
     <label class="field">What the STL fills
       <select id="fill">
-        <option value="white" selected>The pure white, exactly</option>
+        <option value="complete" selected>The whole piece, missing parts restored (guesses unclear shapes)</option>
+        <option value="white">The pure white, exactly</option>
         <option value="missing">The broken-off part of each piece</option>
       </select>
     </label>
@@ -92,6 +105,7 @@
     <h2>3 · Result</h2>
     <div id="empty" class="empty">Photograph the white pieces from straight above.<br>Tape the printed 50 mm marker flat next to them for true size.<br>Take 3–5 photos; they are measured and combined.</div>
     <img id="sheet" alt="Measurement sheet" title="Open full size" hidden>
+    <figure id="fixedFigure" hidden style="margin:0 0 10px"><img id="fixedImage" alt="Full photo with missing parts repaired" style="width:100%;border-radius:8px;border:1px solid var(--line)"><figcaption class="note" style="margin-top:6px">Fixed photo: the missing part of each cube or triangle is painted back in with that piece's own colour. Everything else is the original photo. This is an image only, not a colored 3D model.</figcaption></figure>
     <div id="viewer" hidden></div>
     <div id="headline" class="headline"></div>
     <div id="summary" class="kv"></div>
@@ -103,8 +117,18 @@
 <script>
   const $ = id => document.getElementById(id);
   const photos = [];
+  const originalPhotos = [];
+  const thumbnailUrls = [];
   const MAX_PHOTOS = 8;
   let stream = null;
+  let focusIndex = null;
+  let focusImage = null;
+  let focusImageUrl = null;
+  let focusStart = null;
+  const focusSelections = [];
+  let focusDraft = null;
+  const focusCanvas = $('focusCanvas');
+  const focusContext = focusCanvas.getContext('2d');
 
   function setStatus(text, isError) { $('status').innerHTML = text; $('status').className = isError ? 'err' : ''; }
 
@@ -126,19 +150,200 @@
   function addPhoto(blob) {
     if (!blob || !blob.size) { setStatus('Could not read the photo. Try capturing it again.', true); return; }
     if (photos.length >= MAX_PHOTOS) { setStatus(`At most ${MAX_PHOTOS} photos per scan.`, true); return; }
-    photos.push(blob); renderThumbs();
+    photos.push(blob);
+    originalPhotos.push(blob);
+    renderThumbs();
   }
   function renderThumbs() {
+    thumbnailUrls.forEach(URL.revokeObjectURL);
+    thumbnailUrls.length = 0;
     $('thumbs').innerHTML = '';
     photos.forEach((blob, i) => {
-      const el = document.createElement('div'); el.className = 'thumb';
-      el.innerHTML = `<img alt="Photo ${i + 1}" src="${URL.createObjectURL(blob)}"><button type="button" aria-label="Remove photo ${i + 1}">×</button>`;
-      el.querySelector('button').onclick = () => { photos.splice(i, 1); renderThumbs(); };
+      const el = document.createElement('div');
+      el.className = 'thumb';
+      const image = document.createElement('img');
+      image.alt = `Photo ${i + 1}${blob !== originalPhotos[i] ? ', focused crop' : ''}`;
+      image.src = URL.createObjectURL(blob);
+      thumbnailUrls.push(image.src);
+      const actions = document.createElement('div');
+      actions.className = 'thumb-actions';
+      const focus = document.createElement('button');
+      focus.type = 'button';
+      focus.textContent = 'Focus region';
+      focus.setAttribute('aria-label', `Focus region in photo ${i + 1}`);
+      focus.onclick = () => openFocusEditor(i);
+      actions.appendChild(focus);
+      if (blob !== originalPhotos[i]) {
+        const restore = document.createElement('button');
+        restore.type = 'button';
+        restore.textContent = 'Restore';
+        restore.setAttribute('aria-label', `Restore photo ${i + 1}`);
+        restore.onclick = () => { photos[i] = originalPhotos[i]; renderThumbs(); };
+        actions.appendChild(restore);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'remove-photo';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', `Remove photo ${i + 1}`);
+      remove.onclick = () => {
+        if (focusIndex === i) closeFocusEditor();
+        else if (focusIndex !== null && focusIndex > i) focusIndex -= 1;
+        photos.splice(i, 1);
+        originalPhotos.splice(i, 1);
+        renderThumbs();
+      };
+      actions.appendChild(remove);
+      el.append(image, actions);
       $('thumbs').appendChild(el);
     });
     $('go').disabled = !photos.length;
     $('go').textContent = photos.length ? `Make STL (${photos.length} photo${photos.length > 1 ? 's' : ''})` : 'Make STL';
   }
+  function drawFocusImage() {
+    if (!focusImage) return;
+    focusContext.clearRect(0, 0, focusCanvas.width, focusCanvas.height);
+    focusContext.drawImage(focusImage, 0, 0);
+    const selections = focusDraft ? [...focusSelections, focusDraft] : focusSelections;
+    if (!selections.length) return;
+    focusContext.fillStyle = 'rgba(0, 0, 0, 0.58)';
+    focusContext.fillRect(0, 0, focusCanvas.width, focusCanvas.height);
+    selections.forEach((selection, index) => {
+      const { x, y, width, height } = selection;
+      focusContext.clearRect(x, y, width, height);
+      focusContext.drawImage(focusImage, x, y, width, height, x, y, width, height);
+      focusContext.strokeStyle = '#f2d879';
+      focusContext.lineWidth = Math.max(3, focusCanvas.width / 500);
+      focusContext.strokeRect(x, y, width, height);
+      focusContext.fillStyle = '#f2d879';
+      focusContext.font = `bold ${Math.max(14, focusCanvas.width / 50)}px sans-serif`;
+      focusContext.fillText(String(index + 1), x + 5, y + Math.max(18, focusCanvas.width / 40));
+    });
+  }
+  function focusPoint(event) {
+    const bounds = focusCanvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(focusCanvas.width, (event.clientX - bounds.left) * focusCanvas.width / bounds.width)),
+      y: Math.max(0, Math.min(focusCanvas.height, (event.clientY - bounds.top) * focusCanvas.height / bounds.height))
+    };
+  }
+  function setFocusDraft(start, end) {
+    const width = Math.abs(end.x - start.x);
+    const height = Math.abs(end.y - start.y);
+    const defaultWidth = focusCanvas.width * 0.4;
+    const defaultHeight = focusCanvas.height * 0.4;
+    const left = width < 8 ? start.x - defaultWidth / 2 : Math.min(start.x, end.x);
+    const top = height < 8 ? start.y - defaultHeight / 2 : Math.min(start.y, end.y);
+    const right = width < 8 ? left + defaultWidth : Math.max(start.x, end.x);
+    const bottom = height < 8 ? top + defaultHeight : Math.max(start.y, end.y);
+    const x = Math.max(0, left);
+    const y = Math.max(0, top);
+    focusDraft = {
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(Math.min(focusCanvas.width, right) - x),
+      height: Math.round(Math.min(focusCanvas.height, bottom) - y)
+    };
+    $('applyFocusCrop').disabled = focusSelections.length === 0 && (focusDraft.width < 16 || focusDraft.height < 16);
+    drawFocusImage();
+  }
+  function closeFocusEditor() {
+    $('focusEditor').hidden = true;
+    $('applyFocusCrop').disabled = true;
+    focusIndex = null;
+    focusImage = null;
+    focusStart = null;
+    focusSelections.length = 0;
+    focusDraft = null;
+    $('undoFocusSelection').disabled = true;
+    if (focusImageUrl) URL.revokeObjectURL(focusImageUrl);
+    focusImageUrl = null;
+  }
+  function openFocusEditor(index) {
+    if (focusImageUrl) URL.revokeObjectURL(focusImageUrl);
+    focusIndex = index;
+    focusStart = null;
+    focusSelections.length = 0;
+    focusDraft = null;
+    $('applyFocusCrop').disabled = true;
+    $('undoFocusSelection').disabled = true;
+    $('focusEditor').hidden = false;
+    $('focusStatus').textContent = `Drag around each target in photo ${index + 1}. Add up to 12 regions.`;
+    focusImageUrl = URL.createObjectURL(photos[index]);
+    focusImage = new Image();
+    focusImage.onload = () => {
+      focusCanvas.width = focusImage.naturalWidth;
+      focusCanvas.height = focusImage.naturalHeight;
+      drawFocusImage();
+    };
+    focusImage.src = focusImageUrl;
+    $('focusEditor').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  focusCanvas.addEventListener('pointerdown', event => {
+    if (!focusImage) return;
+    focusStart = focusPoint(event);
+    setFocusDraft(focusStart, focusStart);
+    focusCanvas.setPointerCapture(event.pointerId);
+  });
+  focusCanvas.addEventListener('pointermove', event => {
+    if (focusStart) setFocusDraft(focusStart, focusPoint(event));
+  });
+  focusCanvas.addEventListener('pointerup', event => {
+    if (!focusStart) return;
+    setFocusDraft(focusStart, focusPoint(event));
+    focusStart = null;
+    if (focusSelections.length >= 12) {
+      focusDraft = null;
+      drawFocusImage();
+      $('focusStatus').textContent = 'Maximum of 12 focus regions reached.';
+      return;
+    }
+    if (focusDraft.width >= 16 && focusDraft.height >= 16) focusSelections.push(focusDraft);
+    focusDraft = null;
+    $('applyFocusCrop').disabled = focusSelections.length === 0;
+    $('undoFocusSelection').disabled = focusSelections.length === 0;
+    drawFocusImage();
+    $('focusStatus').textContent = focusSelections.length
+      ? `${focusSelections.length} region${focusSelections.length === 1 ? '' : 's'} selected. Add another box or use focused photo.`
+      : 'Selection was too small. Drag a larger box around the target.';
+  });
+  $('undoFocusSelection').addEventListener('click', () => {
+    focusSelections.pop();
+    $('applyFocusCrop').disabled = focusSelections.length === 0;
+    $('undoFocusSelection').disabled = focusSelections.length === 0;
+    drawFocusImage();
+    $('focusStatus').textContent = focusSelections.length
+      ? `${focusSelections.length} region${focusSelections.length === 1 ? '' : 's'} selected.`
+      : 'All regions removed. Drag a box around each target piece.';
+  });
+  $('applyFocusCrop').addEventListener('click', () => {
+    if (focusIndex === null || !focusImage || !focusSelections.length) return;
+    const x = Math.min(...focusSelections.map(selection => selection.x));
+    const y = Math.min(...focusSelections.map(selection => selection.y));
+    const right = Math.max(...focusSelections.map(selection => selection.x + selection.width));
+    const bottom = Math.max(...focusSelections.map(selection => selection.y + selection.height));
+    const width = right - x;
+    const height = bottom - y;
+    const crop = document.createElement('canvas');
+    crop.width = width;
+    crop.height = height;
+    const cropContext = crop.getContext('2d');
+    cropContext.fillStyle = '#000';
+    cropContext.fillRect(0, 0, width, height);
+    focusSelections.forEach(selection => {
+      cropContext.drawImage(focusImage, selection.x, selection.y, selection.width, selection.height,
+        selection.x - x, selection.y - y, selection.width, selection.height);
+    });
+    crop.toBlob(blob => {
+      if (!blob) { $('focusStatus').textContent = 'Could not crop the photo. Select the region again.'; return; }
+      photos[focusIndex] = blob;
+      const updatedIndex = focusIndex;
+      closeFocusEditor();
+      renderThumbs();
+      setStatus(`Photo ${updatedIndex + 1} cropped and will be used by Whitefill. Keep the whole scale marker in the crop, or use manual scale.`);
+    }, 'image/jpeg', 0.94);
+  });
+  $('cancelFocusCrop').addEventListener('click', closeFocusEditor);
   $('snap').onclick = () => {
     const v = $('video'); if (!v.videoWidth) return;
     const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
@@ -159,7 +364,7 @@
   drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
   drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); [...e.dataTransfer.files].filter(f => f.type.startsWith('image/')).forEach(addPhoto); };
-  $('fill').onchange = () => { $('clearance_mm').value = $('fill').value === 'white' ? 0 : 0.4; };
+  $('fill').onchange = () => { $('clearance_mm').value = $('fill').value === 'missing' ? 0.4 : 0; };
 
   $('go').onclick = async () => {
     const form = new FormData();
@@ -183,12 +388,12 @@
     $('headline').textContent = `${r.parts.length} STL file${r.parts.length > 1 ? 's' : ''} made`;
     const ignored = Object.entries(r.skipped).filter(([, v]) => v).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'nothing';
     $('summary').innerHTML = `
-      <b>Fills</b><span>${r.fill === 'white' ? 'the pure white exactly, nothing around it' : 'the broken-off part of each piece'}</span>
+      <b>Fills</b><span>${{ white: 'the pure white exactly, nothing around it', missing: 'the broken-off part of each piece', complete: 'the whole piece with its missing parts restored' }[r.fill]}</span>
       <b>Ignored</b><span>${ignored}</span>
       <b>Scale</b><span>${r.scale_source}</span>
       <b>Photos used</b><span>${r.photos_measured} of ${r.photos_total}</span>`;
     $('parts').innerHTML = r.parts.map((p, i) => `<div class="part${i ? '' : ' sel'}" data-i="${i}">
-      <span><b>#${i + 1} ${p.kind}</b> · ${p.width_mm} × ${p.length_mm} × ${p.height_mm} mm<br>
+      <span><b>#${i + 1} ${p.guessed ? 'best-guess shape' : p.kind}</b> · ${p.width_mm} × ${p.length_mm} × ${p.height_mm} mm<br>
       <small>${p.shape_sides_mm ? `sides ${p.shape_sides_mm.join(' × ')} mm · ` : ''}${p.pos_mm ? `at ${p.pos_mm[0]}, ${p.pos_mm[1]} mm from marker · ` : ''}${p.volume_cm3} cm³${p.spread_mm != null ? ` · ± ${p.spread_mm} mm` : ''}</small></span>
       <a class="btn primary" href="${url(p.stl)}?download=true">Download STL</a></div>`).join('');
     document.querySelectorAll('.part').forEach(el => {
@@ -198,7 +403,10 @@
         if (window.showSTL) window.showSTL(url(r.parts[+el.dataset.i].stl));
       };
     });
-    $('downloads').innerHTML = `<a class="btn" href="${url(r.sheet)}?download=true">Download measurement sheet</a>`;
+    $('downloads').innerHTML = `<a class="btn" href="${url(r.sheet)}?download=true">Download measurement sheet</a>` +
+      (r.fixed ? ` <a class="btn primary" href="${url(r.fixed)}?download=true">Download fixed photo</a>` : '');
+    $('fixedFigure').hidden = !r.fixed;
+    if (r.fixed) $('fixedImage').src = url(r.fixed);
     if (window.showSTL) window.showSTL(url(r.parts[0].stl));
   }
   fetch('/api/health').then(r => r.json()).then(h => {

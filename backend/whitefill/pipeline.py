@@ -47,12 +47,12 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
     """Return a JSON-safe result dict; STL files and a measurement sheet are written to out_dir.
 
     height_mm 0 -> each part is as tall as its cube is wide (triangle: average side).
-    clearance_mm None -> 0 for fill="white" (exact fill), 0.4 for fill="missing" (so it slides in).
+    clearance_mm None -> 0 for "white" and "complete" (exact), 0.4 for "missing" (so it slides in).
     """
     if not images:
         raise ValueError("No photos")
     if clearance_mm is None:
-        clearance_mm = 0.0 if fill == "white" else 0.4
+        clearance_mm = 0.4 if fill == "missing" else 0.0
     os.makedirs(out_dir, exist_ok=True)
 
     # 1. one flat, square-on frame in millimetres (needs the printed marker)
@@ -131,6 +131,8 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
                 if len(sizes) > 1 else None}
         if shape:
             part["shape_sides_mm"] = [round(v * mm, 1) for v in shape["sides_px"]]
+            if shape.get("guessed"):
+                part["guessed"] = True
         if origin is not None:
             part["pos_mm"] = [round(float(cx - origin[0]) * mm, 1), round(float(cy - origin[1]) * mm, 1)]
         parts.append(part)
@@ -139,8 +141,17 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
 
     sheet_name = f"sheet_{stamp}.jpg"
     cv2.imwrite(os.path.join(out_dir, sheet_name), draw_sheet(views[ref], target, shapes, parts, scale_text))
+    fixed_name = None
+    if found[ref]["repaired"]:
+        fixed_name = f"fixed_{stamp}.jpg"
+        cv2.imwrite(os.path.join(out_dir, fixed_name), found[ref]["fixed"], [cv2.IMWRITE_JPEG_QUALITY, 95])
     cubes = sum(p["kind"] == "cube" for p in parts)
-    what = "filled exactly" if fill == "white" else "with a missing part"
-    return {**base, "ok": True, "parts": parts, "sheet": sheet_name,
-            "description": f"{cubes} pure-white cube(s) and {len(parts) - cubes} triangle(s) {what}; "
+    triangles = sum(p["kind"] == "triangle" for p in parts)
+    guessed = sum(bool(p.get("guessed")) for p in parts)
+    what = {"white": "filled exactly", "missing": "with a missing part",
+            "complete": "completed (missing parts restored)"}[fill]
+    guess_note = f", {guessed} best-guess shape(s)" if guessed else ""
+    return {**base, "ok": True, "parts": parts, "sheet": sheet_name, "fixed": fixed_name,
+            "repaired_pieces": int(found[ref]["repaired"]), "guessed_pieces": guessed,
+            "description": f"{cubes} pure-white cube(s), {triangles} triangle(s){guess_note} {what}; "
                            f"{len(parts)} STL file(s) made; ignored: {ignored}."}

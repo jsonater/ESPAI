@@ -79,15 +79,37 @@ class ConceptMeshApiTests(unittest.TestCase):
         response_mock.__enter__.return_value = response_mock
         response_mock.read.return_value = json.dumps({"response": "Check the car Wi-Fi."}).encode()
         with patch.object(api, "REBEL_MODEL", "support-test-model"), patch("backend.main.urlopen", return_value=response_mock) as request_mock:
-            response = self.client.post("/api/v1/rebel/chat", json={"message": "Camera stopped"})
+            response = self.client.post("/api/v1/rebel/chat", json={"message": "Help with labeling images"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["reply"], "Check the car Wi-Fi.")
         payload = json.loads(request_mock.call_args.args[0].data)
         self.assertEqual(payload["model"], "support-test-model")
         self.assertEqual(response.json()["model"], "support-test-model")
-        self.assertEqual(json.loads(payload["prompt"])["question"], "Camera stopped")
+        self.assertEqual(json.loads(payload["prompt"])["question"], "Help with labeling images")
         self.assertIn("camera_state", payload["system"])
         self.assertNotIn("ROBOFLOW_API_KEY", payload["system"])
+
+    def test_rebel_known_stl_help_uses_verified_steps_without_model(self):
+        with patch("backend.main.urlopen", side_effect=AssertionError("Known help must not call the model")):
+            response = self.client.post("/api/v1/rebel/chat", json={
+                "message": "My GLB conversion failed",
+                "conversion_status": "Choose a GLB file first",
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "local-guide")
+        self.assertIn("Open photo generator", response.json()["reply"])
+        self.assertIn("Choose a GLB file first", response.json()["reply"])
+
+    def test_rebel_guides_match_whole_words_only(self):
+        self.assertIsNone(api.rebel_help_guide("How do I install Ollama?", ""))
+        self.assertIsNone(api.rebel_help_guide("Why is my laptop slow?", ""))
+        self.assertIn("Open photo generator", api.rebel_help_guide("my stl file is broken", ""))
+
+    def test_rebel_whitefill_help_sets_scope_and_archive_help_is_accurate(self):
+        whitefill = self.client.post("/api/v1/rebel/chat", json={"message": "Why can't Whitefill reconstruct a bookshelf?"})
+        archive = self.client.post("/api/v1/rebel/chat", json={"message": "Where are my saved STL files?"})
+        self.assertIn("pure-white pieces only", whitefill.json()["reply"])
+        self.assertIn("not automatically saved", archive.json()["reply"])
 
     def test_rebel_chat_handles_unavailable_ollama_and_invalid_messages(self):
         self.assertEqual(self.client.post("/api/v1/rebel/chat", json={"message": " "}).status_code, 422)

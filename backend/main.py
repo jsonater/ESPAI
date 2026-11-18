@@ -7,6 +7,7 @@ import base64
 import io
 import json
 import os
+import re
 import struct
 import threading
 import time
@@ -372,6 +373,42 @@ class RebelRequest(BaseModel):
     conversion_status: str = Field(default="Unknown", max_length=500)
 
 
+def rebel_help_guide(message: str, conversion_status: str) -> str | None:
+    text = " ".join(message.casefold().split())
+
+    def mentions(*terms: str) -> bool:
+        return any(re.search(rf"\b{re.escape(term)}s?\b", text) for term in terms)
+
+    if mentions("whitefill", "white fill", "pure white", "cube", "triangle"):
+        return (
+            "Whitefill works on pure-white pieces only; it is not a general object or bookshelf reconstructor. "
+            "Add a clear top-down photo, use the printed 50 mm marker for scale, pick 'whole piece' to restore broken parts "
+            "(unclear shapes get a best-guess outline), and click Make STL. It also saves a fixed photo with the missing parts painted in. "
+            "If no pieces are found, improve the lighting and use a contrasting background."
+        )
+    if mentions("archive", "saved scan", "saved stl", "where did"):
+        return (
+            "Open Archive and click Refresh. It lists locally saved Whitefill STL files, measurement sheets and fixed photos. "
+            "Hosted GLB/STL downloads are not automatically saved there."
+        )
+    if mentions("camera", "stream", "frame", "esp32", "wifi", "wi-fi"):
+        status = camera_status()
+        if status["state"] == "streaming":
+            return f"The camera is currently streaming at about {status['fps']} fps. In Live camera, click Connect stream; then use Capture still."
+        return (
+            "Connect the laptop to MyWiFiCar, power the car, then open Live camera and click Connect stream. "
+            "Close other tabs viewing the car camera. If it stays disconnected, power-cycle the car and check its status again."
+        )
+    if mentions("stl", "glb", "mesh", "convert", "conversion", "generate", "generator", "3d model"):
+        status = conversion_status.strip() or "No conversion status available"
+        return (
+            "For image-to-3D, open Reconstruction, use Open photo generator, and download the generated GLB. "
+            "Back in Reconstruction, choose that .glb file, click Convert to STL, then Download STL. "
+            f"Current conversion status: {status}. GLB uploads must be under 50 MiB; this model is approximate, so check scale before printing."
+        )
+    return None
+
+
 def run_rebel_chat(message: str, history: list[RebelMessage], conversion_status: str) -> str:
     camera = camera_status()
     context = {
@@ -433,6 +470,9 @@ async def rebel_chat(request: RebelRequest) -> dict[str, str]:
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=422, detail="Enter a message for Rebel")
+    guide = rebel_help_guide(message, request.conversion_status)
+    if guide:
+        return {"reply": guide, "model": "local-guide"}
     try:
         reply = await run_in_threadpool(run_rebel_chat, message, request.history, request.conversion_status)
     except OllamaTimeoutError as error:

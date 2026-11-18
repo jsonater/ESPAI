@@ -4,15 +4,20 @@ Photos in, one printable STL per piece out, sized in millimetres. It runs fully 
 
 ## What it uses and what it ignores
 
-- **Used:** pure white only, and only pieces shaped like a cube (a square or rectangle from above) or a triangle.
-- **Ignored:** every other colour (cream, yellow, pink, grey, light blue), white mixed or speckled with another colour, other shapes (discs, blobs), pieces bigger than 120 mm or smaller than 5 mm, and pieces cut off by the photo edge.
+- **Used:** pure white only. Cubes and triangles are recognised and completed; in `complete` mode other white shapes get a best-guess outline.
+- **Ignored:** every other colour (cream, yellow, pink, grey, light blue), white mixed or speckled with another colour, other shapes (discs, blobs) unless in `complete` mode, pieces bigger than 120 mm or smaller than 5 mm, and pieces cut off by the photo edge.
 
 ## What the STL fills
 
 | Setting | The STL is |
 |---|---|
-| `fill="white"` (default) | exactly the pure-white area of each piece, with nothing around it |
+| `fill="complete"` (page default) | the whole piece with its missing parts restored. Cubes and triangles are completed from their own edges; other white shapes (discs, blobs) are not skipped but get a **best-guess** outline (convex hull of what is visible), flagged `guessed` in the result |
+| `fill="white"` (API default) | exactly the pure-white area of each piece, with nothing around it |
 | `fill="missing"` | only the part broken off each piece: its full cube or triangle outline minus the white that is there |
+
+Whenever a cube or triangle has a broken part, a **fixed photo** (`fixed_<time>.jpg`) is also saved: the whole photo with each missing part painted back in using that piece's own colour. It is a flat 2D repair, not a coloured 3D model, and only pure-white pieces are repaired.
+
+On the page, **Focus region** lets you drag up to 12 boxes on a photo; only the pixels inside them are analysed.
 
 Each part's height is its cube's width (for a triangle, the average side). Set `height_mm` to force a height.
 
