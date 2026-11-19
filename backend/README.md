@@ -4,15 +4,15 @@ This local backend connects to the car's binary-JPEG WebSocket, validates frames
 
 ## Install and run
 
-From the project directory on Linux Mint:
+From the project directory on Linux or macOS:
 
 ```sh
-source .venv/bin/activate
-python -m pip install -r backend/requirements.txt
-uvicorn backend.main:app --host 127.0.0.1 --port 8000
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt
+.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open the local dashboard at `http://127.0.0.1:8000/`. The health endpoint is `http://127.0.0.1:8000/api/health`; interactive API docs are available at `/docs`.
+For Windows setup, see the project README. Keep the server running and open the local dashboard at `http://127.0.0.1:8000/` on the same computer, not the HTML file or a GitHub page. The health endpoint is `http://127.0.0.1:8000/api/health`; interactive API docs are available at `/docs`.
 
 At startup, the backend creates one WebSocket client task that reconnects to `ws://192.168.4.1/Camera` and caches each binary JPEG. The dashboard's **Live camera** view consumes the backend's `GET /api/v1/camera/stream` MJPEG proxy and polls `GET /api/v1/camera/status`.
 

@@ -81,6 +81,21 @@ class WhitefillApiTests(unittest.TestCase):
         self.assertIn("/api/v1/whitefill/files/batch_", body["files_url"])
         self.assertIn("/scan_", body["files_url"])
 
+    def test_large_photo_preserves_manual_scale_after_resize(self):
+        scene = np.full((1600, 2400, 3), (170, 92, 30), np.uint8)
+        cv2.rectangle(scene, (400, 400), (1040, 1040), (236, 239, 240), -1)
+        ok, image = cv2.imencode(".png", scene)
+        self.assertTrue(ok)
+        response = self.client.post(
+            "/api/v1/whitefill/analyze",
+            files=[("photos", ("large.png", image.tobytes(), "image/png"))],
+            data={"marker_mm": "0", "mm_per_px": "0.125", "fill": "complete"},
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertTrue(result["ok"])
+        self.assertAlmostEqual(result["parts"][0]["width_mm"], 80, delta=2)
+
     def test_whitefill_file_download_and_path_safety(self):
         scan = self.root / "batch_0001" / "scan_20261117_101010_01"
         scan.mkdir(parents=True, exist_ok=True)

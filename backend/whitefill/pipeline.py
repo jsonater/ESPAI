@@ -43,7 +43,8 @@ def _mad(values: list[float]) -> float:
 
 def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, mm_per_px: float = 0.5,
             fill: str = "white", clearance_mm: float | None = None, height_mm: float = 0.0,
-            min_piece_mm: float = 5.0, max_piece_mm: float = 120.0, colour: str = "white") -> dict:
+            min_piece_mm: float = 5.0, max_piece_mm: float = 120.0, colour: str = "white",
+            image_scales: list[float] | None = None) -> dict:
     """Return a JSON-safe result dict; STL files and a measurement sheet are written to out_dir.
 
     height_mm 0 -> each part is as tall as its cube is wide (triangle: average side).
@@ -51,6 +52,8 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
     """
     if not images:
         raise ValueError("No photos")
+    if image_scales is not None and (len(image_scales) != len(images) or any(not 0 < scale <= 1 for scale in image_scales)):
+        raise ValueError("Image scales must match the photos and be greater than zero and at most one")
     if clearance_mm is None:
         clearance_mm = 0.4 if fill == "missing" else 0.0
     os.makedirs(out_dir, exist_ok=True)
@@ -68,10 +71,12 @@ def analyze(images: list[np.ndarray], out_dir: str, *, marker_mm: float = 50.0, 
         valids = [cv2.bitwise_and(v, cv2.bitwise_not(hide)) for v in valids]
         scale_text, origin = f"marker {marker_mm:g} mm, perspective-corrected", mpoly[0]
     else:
-        best = max(images, key=_sharpness)
+        best_index = max(range(len(images)), key=lambda index: _sharpness(images[index]))
+        best = images[best_index]
         views, valids = [best], [np.full(best.shape[:2], 255, np.uint8)]
-        px_per_mm = 1.0 / float(mm_per_px)
-        scale_text = f"manual {mm_per_px:g} mm/px (no marker seen: sizes are a guess)"
+        effective_mm_per_px = float(mm_per_px) / (image_scales[best_index] if image_scales is not None else 1.0)
+        px_per_mm = 1.0 / effective_mm_per_px
+        scale_text = f"manual {mm_per_px:g} mm/px on original photo (no marker seen: sizes are a guess)"
     mm = 1.0 / px_per_mm
 
     # 2. detect in every photo, 3. vote

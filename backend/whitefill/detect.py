@@ -35,6 +35,17 @@ def _missing_part(piece: dict, complete: np.ndarray, side_px: float, valid: np.n
     return np.isin(lab, keep).astype(np.uint8) * 255
 
 
+def _paint_missing(fixed: np.ndarray, img: np.ndarray, piece: dict, gap: np.ndarray,
+                   complete: np.ndarray) -> tuple[np.ndarray, bool]:
+    if not gap.any():
+        return fixed, False
+    piece_colour = np.median(img[piece["mask"] > 0], axis=0)
+    paint = cv2.dilate(gap, _ellipse(2)) & complete
+    alpha = cv2.GaussianBlur(paint.astype(np.float32) / 255.0, (0, 0), 1.0)[..., None]
+    blended = np.rint(fixed * (1 - alpha) + piece_colour * alpha).astype(np.uint8)
+    return np.where(alpha > 0.004, blended, fixed), True
+
+
 def detect(img: np.ndarray, valid: np.ndarray | None, px_per_mm: float | None, fill: str = "white",
            min_mm: float = 5.0, max_mm: float = 120.0, colour: str = "white") -> dict:
     """Find pure-white cubes and triangles.
@@ -65,6 +76,9 @@ def detect(img: np.ndarray, valid: np.ndarray | None, px_per_mm: float | None, f
                 guess = cv2.bitwise_and(guess, valid)
             (_, _), (rw, rh), _ = cv2.minAreaRect(hull)
             target |= guess
+            guess_gap = cv2.bitwise_and(guess, cv2.bitwise_not(piece["mask"]))
+            fixed, repaired_guess = _paint_missing(fixed, img, piece, guess_gap, guess)
+            repaired += int(repaired_guess)
             guessed += 1
             shapes.append({"kind": "piece", "poly": hull.reshape(-1, 2).astype(float).tolist(),
                            "side_px": float(np.sqrt(cv2.contourArea(hull))), "sides_px": [float(rw), float(rh)],
@@ -79,14 +93,8 @@ def detect(img: np.ndarray, valid: np.ndarray | None, px_per_mm: float | None, f
         else:
             part = cv2.bitwise_or(piece["mask"], gap)
         target |= part
-        if gap.any():
-            # Paint the missing area with the piece's own median colour, feathered into the photo.
-            colour = np.median(img[piece["mask"] > 0], axis=0)
-            paint = cv2.dilate(gap, _ellipse(2)) & complete   # also covers the blurred old break edge
-            alpha = cv2.GaussianBlur(paint.astype(np.float32) / 255.0, (0, 0), 1.0)[..., None]
-            blended = np.rint(fixed * (1 - alpha) + colour * alpha).astype(np.uint8)
-            fixed = np.where(alpha > 0.004, blended, fixed)
-            repaired += 1
+        fixed, repaired_piece = _paint_missing(fixed, img, piece, gap, complete)
+        repaired += int(repaired_piece)
         shapes.append({"kind": kind, "poly": np.asarray(poly, float).tolist(), "side_px": float(side_px),
                        "sides_px": [float(v) for v in sides], "has_part": bool(part.any())})
     return {"target": target, "shapes": shapes, "skipped": skipped, "fixed": fixed, "repaired": repaired,

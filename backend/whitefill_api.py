@@ -101,6 +101,7 @@ async def whitefill_analyze(
             and 0 < min_piece_mm < max_piece_mm <= 2000 and clearance_mm <= 5):
         raise HTTPException(status_code=422, detail="A setting is out of range")
     images = []
+    image_scales = []
     for photo in photos:
         data = await photo.read(MAX_PHOTO_BYTES + 1)
         if len(data) > MAX_PHOTO_BYTES:
@@ -110,6 +111,7 @@ async def whitefill_analyze(
             continue
         scale = min(1.0, 1600 / max(image.shape[:2]))
         images.append(cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else image)
+        image_scales.append(scale)
     if not images:
         raise HTTPException(status_code=400, detail="No readable JPEG/PNG photo was sent")
 
@@ -117,7 +119,7 @@ async def whitefill_analyze(
     result = await run_in_threadpool(
         analyze, images, str(scan), marker_mm=marker_mm, mm_per_px=mm_per_px, fill=fill,
         clearance_mm=None if clearance_mm < 0 else clearance_mm, height_mm=height_mm,
-        min_piece_mm=min_piece_mm, max_piece_mm=max_piece_mm, colour=colour)
+        min_piece_mm=min_piece_mm, max_piece_mm=max_piece_mm, colour=colour, image_scales=image_scales)
     result["files_url"] = f"/api/v1/whitefill/files/{scan.parent.name}/{scan.name}"
     return result
 

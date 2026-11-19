@@ -256,6 +256,9 @@
       </header>
 
       <div class="content">
+        <div class="live-note" id="localBackendNotice" role="status" hidden>
+          <strong>Start ESPAI on this computer.</strong> GitHub and opening the HTML file do not start the Python backend. Follow the Start the app section of the project README, then open <a href="http://127.0.0.1:8000/">http://127.0.0.1:8000/</a>.
+        </div>
         <section id="datasetView" aria-label="Training image dataset">
           <div class="page-heading">
             <div><div class="eyebrow">Dataset workspace · stored on this device</div><h1>Training image library</h1><p class="subtitle">Collect and label facade photos before model training.</p></div>
@@ -740,6 +743,7 @@
       window.location.href = '/whitefill';
     });
     const cameraApiBase = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : window.location.origin;
+    document.getElementById('localBackendNotice').hidden = !(window.location.protocol === 'file:' || window.location.hostname.endsWith('.github.io'));
     const cameraFeed = document.getElementById('cameraFeed');
     const cameraPlaceholder = document.getElementById('cameraPlaceholder');
     const analyzeFrameButton = document.getElementById('analyzeFrame');
@@ -1033,11 +1037,11 @@
         document.getElementById('cameraState').textContent = 'Backend offline';
         document.getElementById('cameraState').dataset.state = 'error';
         updateInferenceAvailability();
-        document.getElementById('cameraMessage').textContent = 'Start the local Python backend';
+        document.getElementById('cameraMessage').textContent = 'Start ESPAI on this computer and open http://127.0.0.1:8000/';
         cameraFeed.hidden = true;
         cameraPlaceholder.hidden = false;
         cameraPlaceholder.querySelector('strong').textContent = 'Backend unavailable';
-        cameraPlaceholder.querySelector('span').textContent = 'Start the local Python API, then reconnect.';
+        cameraPlaceholder.querySelector('span').textContent = 'Follow Start the app in the project README, then open http://127.0.0.1:8000/ on this computer.';
         document.getElementById('connectCamera').disabled = false;
         document.getElementById('stopCamera').disabled = true;
         clearInterval(cameraPollTimer);

@@ -27,6 +27,10 @@ Print `markers/marker_50mm.png` at 100 % and check that the black square is 50 m
 
 Take photos from straight above with even light. Light grey and white in shadow can look alike.
 
+When using manual scale, enter millimeters per pixel for the original uploaded
+photo. The backend adjusts that scale if it downsizes a large upload. A marker
+is preferable because manual scale is an estimate and varies with camera distance.
+
 ## Files
 
 | File | Job |

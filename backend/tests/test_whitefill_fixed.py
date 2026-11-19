@@ -83,16 +83,22 @@ class FixedPhotoTests(unittest.TestCase):
     def test_complete_mode_guesses_unclear_shapes_instead_of_skipping_them(self):
         scene = np.full((400, 600, 3), BLUE, np.uint8)
         cv2.circle(scene, (300, 200), 70, WHITE, -1)
+        notch = np.array([[300, 190], [380, 185], [380, 275]])
+        cv2.fillPoly(scene, [notch], BLUE)
         scene = cv2.GaussianBlur(scene, (0, 0), 1.0)
         with tempfile.TemporaryDirectory() as folder:
             skipped = analyze([scene], folder + "/white", marker_mm=0, mm_per_px=0.5, fill="white")
             guessed = analyze([scene], folder + "/whole", marker_mm=0, mm_per_px=0.5, fill="complete")
+            fixed = cv2.imread(str(Path(folder) / "whole" / guessed["fixed"])) if guessed.get("fixed") else None
 
         self.assertFalse(skipped["ok"])
         self.assertTrue(guessed["ok"])
         self.assertTrue(guessed["parts"][0]["guessed"])
         self.assertEqual(guessed["guessed_pieces"], 1)
         self.assertIn("best-guess", guessed["description"])
+        self.assertEqual(guessed["repaired_pieces"], 1)
+        self.assertIsNotNone(fixed)
+        self.assertLess(np.abs(fixed[220, 320].astype(int) - np.array(WHITE)).max(), 25)
 
 
 if __name__ == "__main__":
